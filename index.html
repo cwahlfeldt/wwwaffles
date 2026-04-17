@@ -1,114 +1,131 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>cwaffles — games</title>
-<style>
-  :root {
-    --bg: #0d0f14;
-    --fg: #e6e8ed;
-    --muted: #8b93a7;
-    --accent: #7aa2f7;
-    --card: #161a23;
-    --border: #252a38;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    min-height: 100vh;
-    background: var(--bg);
-    color: var(--fg);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    padding: 3rem 1.5rem;
-  }
-  main {
-    max-width: 900px;
-    margin: 0 auto;
-  }
-  header {
-    margin-bottom: 3rem;
-  }
-  h1 {
-    font-size: 2.5rem;
-    margin: 0 0 0.5rem;
-    letter-spacing: -0.02em;
-  }
-  .tag {
-    color: var(--muted);
-    font-size: 0.95rem;
-  }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 1rem;
-  }
-  a.card {
-    display: block;
-    padding: 1.25rem 1.5rem;
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    color: var(--fg);
-    text-decoration: none;
-    transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
-  }
-  a.card:hover {
-    transform: translateY(-2px);
-    border-color: var(--accent);
-    background: #1b2030;
-  }
-  .name {
-    font-size: 1.15rem;
-    font-weight: 600;
-    margin-bottom: 0.3rem;
-  }
-  .slug {
-    font-size: 0.8rem;
-    color: var(--muted);
-  }
-  footer {
-    margin-top: 4rem;
-    color: var(--muted);
-    font-size: 0.85rem;
-  }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>wwwaffles — games</title>
+  <style>
+    :root {
+      --bg: #0d0f14;
+      --fg: #e6e8ed;
+      --muted: #8b93a7;
+      --accent: #7aa2f7;
+      --card: #161a23;
+      --border: #252a38;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      padding: 3rem 1.5rem;
+    }
+
+    main {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    header {
+      margin-bottom: 3rem;
+    }
+
+    h1 {
+      font-size: 2.5rem;
+      margin: 0 0 0.5rem;
+      letter-spacing: -0.02em;
+    }
+
+    .tag {
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 1rem;
+    }
+
+    a.card {
+      display: block;
+      padding: 1.25rem 1.5rem;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--fg);
+      text-decoration: none;
+      transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+    }
+
+    a.card:hover {
+      transform: translateY(-2px);
+      border-color: var(--accent);
+      background: #1b2030;
+    }
+
+    .name {
+      font-size: 1.15rem;
+      font-weight: 600;
+      margin-bottom: 0.3rem;
+    }
+
+    .slug {
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    footer {
+      margin-top: 4rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+  </style>
 </head>
+
 <body>
-<main>
-  <header>
-    <h1>cwaffles</h1>
-    <div class="tag">little browser games</div>
-  </header>
+  <main>
+    <header>
+      <h1>wwwaffles</h1>
+      <div class="tag">little browser games</div>
+    </header>
 
-  <section class="grid">
-    <a class="card" href="binary-dungeon/">
-      <div class="name">Binary Dungeon</div>
-      <div class="slug">binary-dungeon/</div>
-    </a>
-    <a class="card" href="chrono-swiper/">
-      <div class="name">Chrono-Swipe</div>
-      <div class="slug">chrono-swiper/</div>
-    </a>
-    <a class="card" href="echo-walker/">
-      <div class="name">Echo-Walker</div>
-      <div class="slug">echo-walker/</div>
-    </a>
-    <a class="card" href="hex-linker/">
-      <div class="name">Hex-Linker</div>
-      <div class="slug">hex-linker/</div>
-    </a>
-    <a class="card" href="orbit-strike/">
-      <div class="name">Orbit Strike</div>
-      <div class="slug">orbit-strike/</div>
-    </a>
-    <a class="card" href="voxel-city/">
-      <div class="name">Voxel City — WFC</div>
-      <div class="slug">voxel-city/</div>
-    </a>
-  </section>
+    <section class="grid">
+      <a class="card" href="binary-dungeon/">
+        <div class="name">Binary Dungeon</div>
+        <div class="slug">binary-dungeon/</div>
+      </a>
+      <a class="card" href="chrono-swiper/">
+        <div class="name">Chrono-Swipe</div>
+        <div class="slug">chrono-swiper/</div>
+      </a>
+      <a class="card" href="echo-walker/">
+        <div class="name">Echo-Walker</div>
+        <div class="slug">echo-walker/</div>
+      </a>
+      <a class="card" href="hex-linker/">
+        <div class="name">Hex-Linker</div>
+        <div class="slug">hex-linker/</div>
+      </a>
+      <a class="card" href="orbit-strike/">
+        <div class="name">Orbit Strike</div>
+        <div class="slug">orbit-strike/</div>
+      </a>
+      <a class="card" href="voxel-city/">
+        <div class="name">Voxel City — WFC</div>
+        <div class="slug">voxel-city/</div>
+      </a>
+    </section>
 
-  <footer>click tile → play.</footer>
-</main>
+    <footer>click tile → play.</footer>
+  </main>
 </body>
+
 </html>
