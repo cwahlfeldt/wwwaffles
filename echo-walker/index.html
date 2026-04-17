@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Echo-Walker</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #000; color: #ccc; font-family: 'Courier New', monospace; }
+  #ui {
+    position: fixed; top: 10px; left: 10px; z-index: 10;
+    font-size: 13px; text-shadow: 0 0 4px #000;
+    pointer-events: none; user-select: none;
+  }
+  #ui .bar { width: 180px; height: 8px; background: #222; border: 1px solid #333; margin-top: 4px; }
+  #ui .bar > span { display: block; height: 100%; background: #4af; width: 100%; transition: width 0.1s; }
+  #crosshair {
+    position: fixed; top: 50%; left: 50%; width: 2px; height: 2px;
+    background: #8af; transform: translate(-50%, -50%);
+    box-shadow: 0 0 6px #8af; z-index: 10; pointer-events: none;
+  }
+  #overlay {
+    position: fixed; inset: 0; z-index: 20;
+    background: rgba(0,0,0,0.85);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 20px;
+  }
+  #overlay h1 { color: #8cf; font-size: 36px; margin: 0 0 10px; letter-spacing: 6px; text-shadow: 0 0 12px #38a; }
+  #overlay p { max-width: 520px; line-height: 1.6; color: #aaa; }
+  #overlay button {
+    margin-top: 20px; padding: 10px 30px; background: #123; color: #8cf;
+    border: 1px solid #38a; cursor: pointer; font-family: inherit; font-size: 14px;
+    letter-spacing: 2px;
+  }
+  #overlay button:hover { background: #234; }
+  .hidden { display: none !important; }
+  #msg {
+    position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+    font-size: 18px; color: #f55; text-shadow: 0 0 8px #a00;
+    z-index: 10; opacity: 0; transition: opacity 0.3s; pointer-events: none;
+  }
+  #msg.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div id="ui">
+  <div>ECHO-WALKER</div>
+  <div style="margin-top:8px">PING <div class="bar"><span id="pingBar"></span></div></div>
+  <div style="margin-top:6px">HEARTBEAT <div class="bar"><span id="hbBar" style="background:#f55"></span></div></div>
+  <div style="margin-top:10px" id="dist">SURFACE: —</div>
+</div>
+<div id="crosshair"></div>
+<div id="msg"></div>
+
+<div id="overlay">
+  <h1>ECHO-WALKER</h1>
+  <p>
+    You are lost in the dark below the surface.<br>
+    Emit sonar pings to briefly illuminate the world — but sound draws <span style="color:#f55">them</span>.<br><br>
+    <b>WASD</b> move · <b>Mouse</b> look · <b>Click / Space</b> ping · <b>Shift</b> sprint<br><br>
+    Find the light. Reach the Surface.
+  </p>
+  <button id="startBtn">DESCEND</button>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+
+// --- Setup ---
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+scene.fog = new THREE.Fog(0x000000, 2, 30);
+
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 200);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+const controls = new PointerLockControls(camera, renderer.domElement);
+scene.add(controls.getObject());
+
+// --- Sonar shader material ---
+// Multiple simultaneous pings. Each ping: origin (vec3) + time (float).
+const MAX_PINGS = 8;
+const uniforms = {
+  uPingOrigins: { value: Array.from({ length: MAX_PINGS }, () => new THREE.Vector3(0, -9999, 0)) },
+  uPingTimes:   { value: new Float32Array(MAX_PINGS) },
+  uTime:        { value: 0 },
+  uPlayerPos:   { value: new THREE.Vector3() },
+  uPingSpeed:   { value: 14.0 },
+  uPingLife:    { value: 5.0 },
+  uAmbient:     { value: 0.015 },
+  uTint:        { value: new THREE.Color(0x88bbff) },
+  uEnemyTint:   { value: new THREE.Color(0xff3322) },
+  uIsEnemy:     { value: 0.0 },
+  uIsGoal:      { value: 0.0 },
+};
+
+const vertexShader = /* glsl */`
+  varying vec3 vWorldPos;
+  varying vec3 vNormal;
+  void main() {
+    vec4 wp = modelMatrix * vec4(position, 1.0);
+    vWorldPos = wp.xyz;
+    vNormal = normalize(mat3(modelMatrix) * normal);
+    gl_Position = projectionMatrix * viewMatrix * wp;
+  }
+`;
+
+const fragmentShader = /* glsl */`
+  precision highp float;
+  #define MAX_PINGS ${MAX_PINGS}
+  uniform vec3 uPingOrigins[MAX_PINGS];
+  uniform float uPingTimes[MAX_PINGS];
+  uniform float uTime;
+  uniform vec3 uPlayerPos;
+  uniform float uPingSpeed;
+  uniform float uPingLife;
+  uniform float uAmbient;
+  uniform vec3 uTint;
+  uniform vec3 uEnemyTint;
+  uniform float uIsEnemy;
+  uniform float uIsGoal;
+  varying vec3 vWorldPos;
+  varying vec3 vNormal;
+
+  void main() {
+    float lightAccum = 0.0;
+    for (int i = 0; i < MAX_PINGS; i++) {
+      float age = uTime - uPingTimes[i];
+      if (age < 0.0 || age > uPingLife) continue;
+      float r = age * uPingSpeed;
+      float d = distance(vWorldPos, uPingOrigins[i]);
+      // Wavefront band: narrow ring where echo hits surface.
+      float band = 1.5;
+      float wave = 1.0 - clamp(abs(d - r) / band, 0.0, 1.0);
+      wave = pow(wave, 2.0);
+      // Attenuate with age (fade out) and distance (fade over range).
+      float ageFade = 1.0 - (age / uPingLife);
+      float distFade = 1.0 - clamp(d / 40.0, 0.0, 1.0);
+      lightAccum += wave * ageFade * distFade * 2.2;
+    }
+
+    // Proximity glow — tiny radius around player so you don't feel totally blind.
+    float proxD = distance(vWorldPos, uPlayerPos);
+    float prox = (1.0 - clamp(proxD / 3.5, 0.0, 1.0)) * 0.18;
+
+    vec3 baseTint = mix(uTint, uEnemyTint, uIsEnemy);
+    if (uIsGoal > 0.5) baseTint = vec3(1.0, 0.92, 0.5);
+
+    // Facing term to give geometry form.
+    vec3 viewDir = normalize(uPlayerPos - vWorldPos);
+    float facing = max(dot(vNormal, viewDir), 0.0);
+    facing = 0.35 + 0.65 * facing;
+
+    float intensity = uAmbient + (lightAccum + prox) * facing;
+
+    vec3 col = baseTint * intensity;
+
+    // Enemy always has a faint red pulse so ping reveal is scary.
+    if (uIsEnemy > 0.5) {
+      float pulse = 0.5 + 0.5 * sin(uTime * 6.0);
+      col += uEnemyTint * lightAccum * 0.6 * pulse;
+    }
+    // Goal pulses welcoming gold.
+    if (uIsGoal > 0.5) {
+      float pulse = 0.5 + 0.5 * sin(uTime * 2.0);
+      col += vec3(1.0, 0.85, 0.4) * (0.1 + 0.3 * pulse);
+    }
+
+    gl_FragColor = vec4(col, 1.0);
+  }
+`;
+
+function makeSonarMat(overrides = {}) {
+  const u = {};
+  for (const k in uniforms) u[k] = uniforms[k];
+  // Per-material flags (isEnemy/isGoal) override the shared uniform via onBeforeRender.
+  const mat = new THREE.ShaderMaterial({
+    uniforms: u,
+    vertexShader,
+    fragmentShader,
+    side: THREE.DoubleSide,
+  });
+  mat.userData.isEnemy = overrides.isEnemy || 0;
+  mat.userData.isGoal = overrides.isGoal || 0;
+  mat.onBeforeRender = () => {
+    uniforms.uIsEnemy.value = mat.userData.isEnemy;
+    uniforms.uIsGoal.value = mat.userData.isGoal;
+  };
+  return mat;
+}
+
+const wallMat = makeSonarMat();
+const enemyMat = makeSonarMat({ isEnemy: 1 });
+const goalMat = makeSonarMat({ isGoal: 1 });
+
+// --- World generation ---
+// Grid-based maze of rooms + corridors. Tiles: 0 = floor, 1 = wall.
+const GRID = 40;
+const TILE = 4;
+
+function generateMaze(size) {
+  const g = Array.from({ length: size }, () => new Array(size).fill(1));
+  // Randomized DFS on odd cells.
+  const stack = [[1, 1]];
+  g[1][1] = 0;
+  const dirs = [[0, 2], [0, -2], [2, 0], [-2, 0]];
+  while (stack.length) {
+    const [x, y] = stack[stack.length - 1];
+    const choices = dirs
+      .map(d => [x + d[0], y + d[1], d])
+      .filter(([nx, ny]) => nx > 0 && ny > 0 && nx < size - 1 && ny < size - 1 && g[nx][ny] === 1);
+    if (!choices.length) { stack.pop(); continue; }
+    const [nx, ny, d] = choices[Math.floor(Math.random() * choices.length)];
+    g[x + d[0] / 2][y + d[1] / 2] = 0;
+    g[nx][ny] = 0;
+    stack.push([nx, ny]);
+  }
+  // Knock out ~8% extra walls for loops (avoid dead-end monotony).
+  for (let i = 0; i < size * size * 0.08; i++) {
+    const x = 1 + Math.floor(Math.random() * (size - 2));
+    const y = 1 + Math.floor(Math.random() * (size - 2));
+    g[x][y] = 0;
+  }
+  return g;
+}
+
+const maze = generateMaze(GRID);
+
+function toWorld(gx, gz) {
+  return [(gx - GRID / 2) * TILE, (gz - GRID / 2) * TILE];
+}
+
+// Build merged wall geometry.
+const wallGeoms = [];
+const wallBoxes = []; // for collision
+const wallHeight = 3;
+for (let x = 0; x < GRID; x++) {
+  for (let z = 0; z < GRID; z++) {
+    if (maze[x][z] === 1) {
+      const [wx, wz] = toWorld(x, z);
+      const box = new THREE.BoxGeometry(TILE, wallHeight, TILE);
+      box.translate(wx, wallHeight / 2, wz);
+      wallGeoms.push(box);
+      wallBoxes.push(new THREE.Box3(
+        new THREE.Vector3(wx - TILE / 2, 0, wz - TILE / 2),
+        new THREE.Vector3(wx + TILE / 2, wallHeight, wz + TILE / 2),
+      ));
+    }
+  }
+}
+// Floor + ceiling as single planes (big quads).
+const worldHalf = (GRID * TILE) / 2;
+const floorGeo = new THREE.PlaneGeometry(GRID * TILE, GRID * TILE, 1, 1);
+floorGeo.rotateX(-Math.PI / 2);
+const floor = new THREE.Mesh(floorGeo, wallMat);
+scene.add(floor);
+
+const ceilGeo = new THREE.PlaneGeometry(GRID * TILE, GRID * TILE, 1, 1);
+ceilGeo.rotateX(Math.PI / 2);
+ceilGeo.translate(0, wallHeight, 0);
+const ceil = new THREE.Mesh(ceilGeo, wallMat);
+scene.add(ceil);
+
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+const wallsMerged = mergeGeometries(wallGeoms);
+const walls = new THREE.Mesh(wallsMerged, wallMat);
+scene.add(walls);
+
+// Pick spawn and goal from reachable open cells, maximally apart.
+const openCells = [];
+for (let x = 0; x < GRID; x++) for (let z = 0; z < GRID; z++) if (maze[x][z] === 0) openCells.push([x, z]);
+const spawnCell = [1, 1];
+let goalCell = spawnCell;
+let bestD = 0;
+for (const c of openCells) {
+  const d = Math.hypot(c[0] - spawnCell[0], c[1] - spawnCell[1]);
+  if (d > bestD) { bestD = d; goalCell = c; }
+}
+const [sx, sz] = toWorld(spawnCell[0], spawnCell[1]);
+const [gx, gz] = toWorld(goalCell[0], goalCell[1]);
+controls.getObject().position.set(sx, 1.6, sz);
+
+// Goal: glowing pillar
+const goalGeo = new THREE.CylinderGeometry(0.4, 0.6, 2.8, 16);
+const goal = new THREE.Mesh(goalGeo, goalMat);
+goal.position.set(gx, 1.4, gz);
+scene.add(goal);
+
+// --- Enemies ---
+class Predator {
+  constructor(pos) {
+    const g = new THREE.IcosahedronGeometry(0.55, 0);
+    this.mesh = new THREE.Mesh(g, enemyMat);
+    this.mesh.position.copy(pos);
+    scene.add(this.mesh);
+    this.vel = new THREE.Vector3();
+    this.alert = 0; // 0..1 aggression
+    this.target = null;
+    this.wanderT = 0;
+    this.wanderDir = new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
+  }
+  update(dt, playerPos) {
+    // Decay alertness.
+    this.alert = Math.max(0, this.alert - dt * 0.05);
+    const toPlayer = new THREE.Vector3().subVectors(playerPos, this.mesh.position);
+    toPlayer.y = 0;
+    const dist = toPlayer.length();
+
+    let dir;
+    if (this.alert > 0.1 && dist < 40) {
+      // Chase.
+      dir = toPlayer.normalize();
+    } else {
+      // Wander: change direction occasionally, bounce off walls.
+      this.wanderT -= dt;
+      if (this.wanderT <= 0) {
+        this.wanderT = 1 + Math.random() * 3;
+        this.wanderDir.set(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
+      }
+      dir = this.wanderDir.clone();
+    }
+
+    const speed = 1.2 + this.alert * 3.2;
+    const next = this.mesh.position.clone().addScaledVector(dir, speed * dt);
+    // Wall collide — try axis-separated movement.
+    const nx = new THREE.Vector3(next.x, this.mesh.position.y, this.mesh.position.z);
+    const nz = new THREE.Vector3(this.mesh.position.x, this.mesh.position.y, next.z);
+    if (!collides(nx, 0.6)) this.mesh.position.x = nx.x;
+    else this.wanderDir.x *= -1;
+    if (!collides(nz, 0.6)) this.mesh.position.z = nz.z;
+    else this.wanderDir.z *= -1;
+
+    // Hover bob.
+    this.mesh.position.y = 1.0 + Math.sin(performance.now() * 0.003 + this.mesh.id) * 0.2;
+    this.mesh.rotation.y += dt * (0.5 + this.alert * 2);
+  }
+  hearPing(origin, radius) {
+    const d = this.mesh.position.distanceTo(origin);
+    if (d <= radius + 2) {
+      // Louder if closer to wavefront.
+      const loudness = 1.0 - Math.min(1, d / 50);
+      this.alert = Math.min(1, this.alert + 0.35 + loudness * 0.4);
+    }
+  }
+}
+
+function collides(pos, radius) {
+  for (const box of wallBoxes) {
+    if (pos.x + radius > box.min.x && pos.x - radius < box.max.x &&
+        pos.z + radius > box.min.z && pos.z - radius < box.max.z) return true;
+  }
+  return false;
+}
+
+const predators = [];
+// Seed predators in open cells, but not too close to spawn.
+const predatorCount = 8;
+for (let i = 0; i < predatorCount; i++) {
+  let cell;
+  let tries = 0;
+  while (tries++ < 200) {
+    const c = openCells[Math.floor(Math.random() * openCells.length)];
+    const d = Math.hypot(c[0] - spawnCell[0], c[1] - spawnCell[1]);
+    if (d > 6) { cell = c; break; }
+  }
+  if (!cell) cell = openCells[Math.floor(Math.random() * openCells.length)];
+  const [wx, wz] = toWorld(cell[0], cell[1]);
+  predators.push(new Predator(new THREE.Vector3(wx, 1, wz)));
+}
+
+// --- Ping system ---
+let pingSlot = 0;
+let pingCharge = 1.0;
+const PING_COOLDOWN = 1.2;
+
+function emitPing() {
+  if (pingCharge < 0.34) return false; // require at least one-third charge
+  const origin = controls.getObject().position.clone();
+  uniforms.uPingOrigins.value[pingSlot].copy(origin);
+  uniforms.uPingTimes.value[pingSlot] = uniforms.uTime.value;
+  pingSlot = (pingSlot + 1) % MAX_PINGS;
+  // Alert predators over time as wavefront expands.
+  // Schedule alerts — simplest: check each frame in enemy update, but we know radius = age*speed.
+  // Easier: register active ping separately.
+  activePings.push({ origin, t0: uniforms.uTime.value });
+  pingCharge -= 0.34;
+  playPingSound();
+  return true;
+}
+
+const activePings = [];
+
+// --- Input ---
+const keys = {};
+document.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'Space') { e.preventDefault(); emitPing(); }
+});
+document.addEventListener('keyup', e => { keys[e.code] = false; });
+document.addEventListener('mousedown', e => {
+  if (document.pointerLockElement === renderer.domElement) emitPing();
+});
+
+// --- UI ---
+const pingBar = document.getElementById('pingBar');
+const hbBar = document.getElementById('hbBar');
+const distEl = document.getElementById('dist');
+const msgEl = document.getElementById('msg');
+const overlay = document.getElementById('overlay');
+const startBtn = document.getElementById('startBtn');
+
+function showMsg(text, color = '#f55') {
+  msgEl.textContent = text;
+  msgEl.style.color = color;
+  msgEl.classList.add('show');
+  clearTimeout(showMsg._t);
+  showMsg._t = setTimeout(() => msgEl.classList.remove('show'), 2500);
+}
+
+startBtn.addEventListener('click', () => {
+  overlay.classList.add('hidden');
+  controls.lock();
+});
+controls.addEventListener('unlock', () => {
+  if (!gameOver && !won) overlay.classList.remove('hidden');
+});
+
+// --- Audio (WebAudio synthesis, no assets) ---
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+function playPingSound() {
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(880, audioCtx.currentTime);
+  o.frequency.exponentialRampToValueAtTime(220, audioCtx.currentTime + 0.4);
+  g.gain.setValueAtTime(0.25, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.6);
+  o.connect(g).connect(audioCtx.destination);
+  o.start();
+  o.stop(audioCtx.currentTime + 0.65);
+}
+function playHeartbeat(intensity) {
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(55, audioCtx.currentTime);
+  g.gain.setValueAtTime(0, audioCtx.currentTime);
+  g.gain.linearRampToValueAtTime(0.4 * intensity, audioCtx.currentTime + 0.03);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.18);
+  o.connect(g).connect(audioCtx.destination);
+  o.start();
+  o.stop(audioCtx.currentTime + 0.2);
+}
+function playGrowl() {
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = 'sawtooth';
+  o.frequency.setValueAtTime(80 + Math.random() * 30, audioCtx.currentTime);
+  o.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 0.5);
+  g.gain.setValueAtTime(0.15, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.6);
+  o.connect(g).connect(audioCtx.destination);
+  o.start();
+  o.stop(audioCtx.currentTime + 0.65);
+}
+function playWin() {
+  [523, 659, 784, 1047].forEach((f, i) => {
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = 'triangle';
+    o.frequency.value = f;
+    const t = audioCtx.currentTime + i * 0.15;
+    g.gain.setValueAtTime(0.0, t);
+    g.gain.linearRampToValueAtTime(0.2, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(t);
+    o.stop(t + 0.65);
+  });
+}
+function playDeath() {
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = 'sawtooth';
+  o.frequency.setValueAtTime(200, audioCtx.currentTime);
+  o.frequency.exponentialRampToValueAtTime(30, audioCtx.currentTime + 1.2);
+  g.gain.setValueAtTime(0.4, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 1.3);
+  o.connect(g).connect(audioCtx.destination);
+  o.start();
+  o.stop(audioCtx.currentTime + 1.3);
+}
+
+// --- Game state ---
+let gameOver = false;
+let won = false;
+let heartbeatTimer = 0;
+
+function endGame(winFlag) {
+  if (gameOver || won) return;
+  if (winFlag) { won = true; playWin(); }
+  else { gameOver = true; playDeath(); }
+  controls.unlock();
+  overlay.classList.remove('hidden');
+  overlay.querySelector('h1').textContent = winFlag ? 'THE SURFACE' : 'CONSUMED';
+  overlay.querySelector('h1').style.color = winFlag ? '#fd8' : '#f55';
+  overlay.querySelector('p').innerHTML = winFlag
+    ? 'You found the light. The dark recedes — for now.<br><br>'
+    : 'The dark drank you.<br><br>';
+  startBtn.textContent = 'AGAIN';
+  startBtn.onclick = () => location.reload();
+}
+
+// --- Movement ---
+const velocity = new THREE.Vector3();
+const PLAYER_R = 0.5;
+
+function updatePlayer(dt) {
+  const forward = new THREE.Vector3();
+  camera.getWorldDirection(forward);
+  forward.y = 0; forward.normalize();
+  const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+
+  const move = new THREE.Vector3();
+  if (keys['KeyW']) move.add(forward);
+  if (keys['KeyS']) move.sub(forward);
+  if (keys['KeyD']) move.add(right);
+  if (keys['KeyA']) move.sub(right);
+  if (move.lengthSq() > 0) move.normalize();
+  const speed = (keys['ShiftLeft'] || keys['ShiftRight']) ? 6 : 3.5;
+  move.multiplyScalar(speed * dt);
+
+  const p = controls.getObject().position;
+  const nx = p.clone(); nx.x += move.x;
+  const nz = p.clone(); nz.z += move.z;
+  if (!collides(nx, PLAYER_R)) p.x = nx.x;
+  if (!collides(nz, PLAYER_R)) p.z = nz.z;
+
+  // Clamp inside world.
+  p.x = Math.max(-worldHalf + 1, Math.min(worldHalf - 1, p.x));
+  p.z = Math.max(-worldHalf + 1, Math.min(worldHalf - 1, p.z));
+
+  // Sprint footstep alerts predators slightly.
+  if ((keys['ShiftLeft'] || keys['ShiftRight']) && move.lengthSq() > 0) {
+    footstepTimer -= dt;
+    if (footstepTimer <= 0) {
+      footstepTimer = 0.5;
+      predators.forEach(p2 => {
+        const d = p2.mesh.position.distanceTo(p);
+        if (d < 10) p2.alert = Math.min(1, p2.alert + 0.1);
+      });
+    }
+  }
+}
+let footstepTimer = 0;
+
+// --- Main loop ---
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(0.05, clock.getDelta());
+  uniforms.uTime.value += dt;
+
+  const playing = !gameOver && !won && overlay.classList.contains('hidden');
+
+  if (playing) {
+    updatePlayer(dt);
+    const pPos = controls.getObject().position;
+    uniforms.uPlayerPos.value.copy(pPos);
+
+    // Ping charge regen.
+    pingCharge = Math.min(1, pingCharge + dt / PING_COOLDOWN);
+
+    // Update active pings, alert predators as wavefront passes them.
+    for (let i = activePings.length - 1; i >= 0; i--) {
+      const pg = activePings[i];
+      const age = uniforms.uTime.value - pg.t0;
+      const prevR = (age - dt) * uniforms.uPingSpeed.value;
+      const curR = age * uniforms.uPingSpeed.value;
+      predators.forEach(pr => {
+        const d = pr.mesh.position.distanceTo(pg.origin);
+        if (d >= prevR && d <= curR) pr.hearPing(pg.origin, curR);
+      });
+      if (age > uniforms.uPingLife.value) activePings.splice(i, 1);
+    }
+
+    predators.forEach(p2 => p2.update(dt, pPos));
+
+    // Collision check w/ predators -> death.
+    let maxAlert = 0;
+    let nearestPred = Infinity;
+    predators.forEach(p2 => {
+      const d = p2.mesh.position.distanceTo(pPos);
+      if (d < 0.9) endGame(false);
+      if (p2.alert > maxAlert) maxAlert = p2.alert;
+      if (d < nearestPred) nearestPred = d;
+    });
+
+    // Heartbeat audio: faster as threat closer / more alert.
+    const threat = Math.max(maxAlert, 1 - Math.min(1, nearestPred / 14));
+    const hbInterval = 1.2 - threat * 0.9;
+    heartbeatTimer -= dt;
+    if (heartbeatTimer <= 0 && threat > 0.15) {
+      heartbeatTimer = hbInterval;
+      playHeartbeat(0.5 + threat);
+      if (threat > 0.7 && Math.random() < 0.2) playGrowl();
+    }
+    hbBar.style.width = Math.round(threat * 100) + '%';
+
+    // Goal check.
+    const goalDist = pPos.distanceTo(goal.position);
+    distEl.textContent = `SURFACE: ${goalDist.toFixed(1)}m`;
+    if (goalDist < 1.5) endGame(true);
+
+    pingBar.style.width = Math.round(pingCharge * 100) + '%';
+    pingBar.style.background = pingCharge < 0.34 ? '#555' : '#4af';
+  }
+
+  renderer.render(scene, camera);
+}
+animate();
+
+</script>
+</body>
+</html>

@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Binary Dungeon</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0a0a14;
+    color: #c8c8d8;
+    font-family: 'Courier New', monospace;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+    user-select: none;
+  }
+  h1 {
+    color: #7ae0ff;
+    letter-spacing: 4px;
+    margin-bottom: 8px;
+    text-shadow: 0 0 12px rgba(122,224,255,0.4);
+  }
+  .sub { color: #6a6a8a; margin-bottom: 16px; font-size: 13px; }
+  .hud {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 12px;
+    font-size: 14px;
+  }
+  .hud span { color: #7ae0ff; }
+  .hud b { color: #ffd966; }
+  #board {
+    display: grid;
+    gap: 2px;
+    background: #1a1a28;
+    padding: 8px;
+    border-radius: 6px;
+    box-shadow: 0 0 30px rgba(122,224,255,0.15);
+  }
+  .cell {
+    width: 42px;
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    position: relative;
+    border-radius: 3px;
+    transition: background 0.12s, transform 0.1s;
+  }
+  .floor  { background: #242438; }
+  .wall   { background: #0d0d16; color: #3a3a4a; }
+  .exit   { background: #2d5f3a; box-shadow: inset 0 0 10px #7fff9a; }
+  .water  { background: #1e4a7a; }
+  .lava   { background: #8a2a1a; box-shadow: inset 0 0 8px #ff6a3a; }
+  .bridge { background: #5a3a1a; }
+  .pit    { background: #050508; box-shadow: inset 0 0 12px #000; }
+  .toggle { cursor: pointer; }
+  .toggle:hover { transform: scale(1.08); filter: brightness(1.3); }
+  .toggle::after {
+    content: '';
+    position: absolute;
+    inset: 2px;
+    border: 1px dashed rgba(255,255,255,0.25);
+    border-radius: 2px;
+    pointer-events: none;
+  }
+  .hero {
+    position: absolute;
+    width: 42px;
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 26px;
+    transition: left 0.18s linear, top 0.18s linear;
+    filter: drop-shadow(0 0 6px #ffd966);
+    z-index: 5;
+    pointer-events: none;
+  }
+  #stage { position: relative; }
+  .treasure { color: #ffd966; text-shadow: 0 0 8px #ffd966; }
+  .dead { filter: grayscale(1) brightness(0.4); }
+  .controls {
+    margin-top: 16px;
+    display: flex;
+    gap: 12px;
+  }
+  button {
+    background: #2a2a44;
+    color: #c8c8d8;
+    border: 1px solid #4a4a6a;
+    padding: 8px 18px;
+    font-family: inherit;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 13px;
+    letter-spacing: 2px;
+  }
+  button:hover { background: #3a3a5a; border-color: #7ae0ff; color: #7ae0ff; }
+  .legend {
+    margin-top: 18px;
+    font-size: 12px;
+    color: #6a6a8a;
+    max-width: 520px;
+    text-align: center;
+    line-height: 1.6;
+  }
+  .legend b { color: #7ae0ff; }
+  #msg {
+    min-height: 24px;
+    margin-top: 10px;
+    font-size: 14px;
+    letter-spacing: 1px;
+  }
+  .win  { color: #7fff9a; }
+  .lose { color: #ff6a6a; }
+  .flash { animation: flash 0.3s ease; }
+  @keyframes flash {
+    0%   { filter: brightness(2.5); }
+    100% { filter: brightness(1); }
+  }
+</style>
+</head>
+<body>
+  <h1>BINARY DUNGEON</h1>
+  <div class="sub">click switches · flip world · save hero · grab loot</div>
+  <div class="hud">
+    <span>LEVEL <b id="level">1</b></span>
+    <span>GOLD <b id="gold">0</b></span>
+    <span>SCORE <b id="score">0</b></span>
+    <span>LIVES <b id="lives">3</b></span>
+  </div>
+  <div id="stage">
+    <div id="board"></div>
+  </div>
+  <div id="msg"></div>
+  <div class="controls">
+    <button id="reset">RESET</button>
+    <button id="next" style="display:none">NEXT ▶</button>
+  </div>
+  <div class="legend">
+    <b>@</b> hero (auto-walks) · <b>X</b> exit · <b>$</b> treasure · <b>◆</b> switch (click to flip paired tiles)<br>
+    dashed tiles = togglable. water/bridge safe · lava/pit kill. plan path, flip states, max gold.
+  </div>
+
+<script>
+'use strict';
+
+const TILE = {
+  FLOOR: 0, WALL: 1, EXIT: 2,
+  WATER: 3, LAVA: 4, BRIDGE: 5, PIT: 6,
+};
+const LETHAL = new Set([TILE.LAVA, TILE.PIT]);
+const WALKABLE = new Set([TILE.FLOOR, TILE.EXIT, TILE.WATER, TILE.BRIDGE, TILE.LAVA, TILE.PIT]);
+
+const LEVELS = [
+  {
+    w: 9, h: 7,
+    grid: [
+      '#########',
+      '#@..A...#',
+      '#.###.#.#',
+      '#.#$#.#.#',
+      '#.#.#.#B#',
+      '#...a.bX#',
+      '#########',
+    ],
+    groups: {
+      A: { on: TILE.BRIDGE, off: TILE.PIT },
+      B: { on: TILE.BRIDGE, off: TILE.PIT },
+    },
+  },
+  {
+    w: 11, h: 8,
+    grid: [
+      '###########',
+      '#@.$.#..$.#',
+      '#.##A##.#.#',
+      '#.#a....#.#',
+      '#.#.###B#.#',
+      '#.$.#b..$.#',
+      '#...#...#X#',
+      '###########',
+    ],
+    groups: {
+      A: { on: TILE.WATER, off: TILE.LAVA },
+      B: { on: TILE.BRIDGE, off: TILE.PIT },
+    },
+  },
+  {
+    w: 13, h: 9,
+    grid: [
+      '#############',
+      '#@...A...$..#',
+      '#.###.###.#.#',
+      '#.#a$.$.b.#.#',
+      '#.#.#####.#.#',
+      '#.#..C....#.#',
+      '#.#####.###.#',
+      '#.....c...$X#',
+      '#############',
+    ],
+    groups: {
+      A: { on: TILE.BRIDGE, off: TILE.PIT },
+      B: { on: TILE.WATER, off: TILE.LAVA },
+      C: { on: TILE.BRIDGE, off: TILE.PIT },
+    },
+  },
+];
+
+const state = {
+  levelIdx: 0,
+  grid: [],
+  w: 0, h: 0,
+  hero: { x: 0, y: 0 },
+  exit: { x: 0, y: 0 },
+  treasures: new Set(),
+  switches: [],
+  groups: {},
+  gold: 0,
+  score: 0,
+  lives: 3,
+  running: false,
+  path: [],
+  stepTimer: null,
+  dead: false,
+};
+
+const boardEl = document.getElementById('board');
+const stageEl = document.getElementById('stage');
+const msgEl = document.getElementById('msg');
+const goldEl = document.getElementById('gold');
+const scoreEl = document.getElementById('score');
+const livesEl = document.getElementById('lives');
+const levelEl = document.getElementById('level');
+const resetBtn = document.getElementById('reset');
+const nextBtn = document.getElementById('next');
+let heroEl = null;
+
+function key(x, y) { return y * 1000 + x; }
+
+function loadLevel(idx) {
+  const L = LEVELS[idx];
+  state.levelIdx = idx;
+  state.w = L.w;
+  state.h = L.h;
+  state.grid = [];
+  state.treasures = new Set();
+  state.switches = [];
+  state.groups = {};
+  state.dead = false;
+  state.running = false;
+  state.path = [];
+  if (state.stepTimer) { clearInterval(state.stepTimer); state.stepTimer = null; }
+
+  for (const [letter, cfg] of Object.entries(L.groups)) {
+    state.groups[letter] = { ...cfg, flipped: false };
+  }
+
+  for (let y = 0; y < L.h; y++) {
+    const row = [];
+    for (let x = 0; x < L.w; x++) {
+      const c = L.grid[y][x];
+      let tile = TILE.FLOOR;
+      if (c === '#') tile = TILE.WALL;
+      else if (c === 'X') { tile = TILE.EXIT; state.exit = { x, y }; }
+      else if (c === '@') { tile = TILE.FLOOR; state.hero = { x, y }; }
+      else if (c === '$') { tile = TILE.FLOOR; state.treasures.add(key(x, y)); }
+      else if (c >= 'A' && c <= 'Z') {
+        tile = TILE.FLOOR;
+        state.switches.push({ x, y, group: c });
+      } else if (c >= 'a' && c <= 'z') {
+        const g = c.toUpperCase();
+        tile = state.groups[g].on;
+        row.push({ tile, group: g });
+        continue;
+      }
+      row.push({ tile, group: null });
+    }
+    state.grid.push(row);
+  }
+
+  levelEl.textContent = idx + 1;
+  goldEl.textContent = state.gold;
+  scoreEl.textContent = state.score;
+  livesEl.textContent = state.lives;
+  msgEl.textContent = '';
+  msgEl.className = '';
+  nextBtn.style.display = 'none';
+  render();
+  setTimeout(startHero, 400);
+}
+
+function render() {
+  boardEl.innerHTML = '';
+  boardEl.style.gridTemplateColumns = `repeat(${state.w}, 42px)`;
+  boardEl.style.gridTemplateRows = `repeat(${state.h}, 42px)`;
+
+  for (let y = 0; y < state.h; y++) {
+    for (let x = 0; x < state.w; x++) {
+      const cell = state.grid[y][x];
+      const div = document.createElement('div');
+      div.className = 'cell ' + tileClass(cell.tile);
+      div.dataset.x = x;
+      div.dataset.y = y;
+
+      const sw = state.switches.find(s => s.x === x && s.y === y);
+      if (sw) {
+        div.classList.add('toggle');
+        div.textContent = '◆';
+        div.style.color = '#ffd966';
+        div.onclick = () => flipGroup(sw.group);
+      } else if (cell.group) {
+        div.classList.add('toggle');
+      } else if (cell.tile === TILE.EXIT) {
+        div.textContent = 'X';
+        div.style.color = '#7fff9a';
+        div.style.fontWeight = 'bold';
+      } else if (cell.tile === TILE.WALL) {
+        div.textContent = '#';
+      }
+
+      if (state.treasures.has(key(x, y))) {
+        const t = document.createElement('span');
+        t.className = 'treasure';
+        t.textContent = '$';
+        t.style.position = 'absolute';
+        div.appendChild(t);
+      }
+
+      boardEl.appendChild(div);
+    }
+  }
+
+  if (!heroEl) {
+    heroEl = document.createElement('div');
+    heroEl.className = 'hero';
+    heroEl.textContent = '@';
+    stageEl.appendChild(heroEl);
+  }
+  positionHero();
+}
+
+function tileClass(t) {
+  switch (t) {
+    case TILE.WALL: return 'wall';
+    case TILE.EXIT: return 'exit';
+    case TILE.WATER: return 'water';
+    case TILE.LAVA: return 'lava';
+    case TILE.BRIDGE: return 'bridge';
+    case TILE.PIT: return 'pit';
+    default: return 'floor';
+  }
+}
+
+function positionHero() {
+  const pad = 8;
+  const size = 42, gap = 2;
+  heroEl.style.left = (pad + state.hero.x * (size + gap)) + 'px';
+  heroEl.style.top  = (pad + state.hero.y * (size + gap)) + 'px';
+  if (state.dead) heroEl.classList.add('dead');
+  else heroEl.classList.remove('dead');
+}
+
+function flipGroup(letter) {
+  const g = state.groups[letter];
+  if (!g) return;
+  g.flipped = !g.flipped;
+  const newTile = g.flipped ? g.off : g.on;
+  for (let y = 0; y < state.h; y++) {
+    for (let x = 0; x < state.w; x++) {
+      if (state.grid[y][x].group === letter) {
+        state.grid[y][x].tile = newTile;
+      }
+    }
+  }
+  render();
+  boardEl.classList.add('flash');
+  setTimeout(() => boardEl.classList.remove('flash'), 300);
+  replan();
+}
+
+function neighbors(x, y) {
+  return [[1,0],[-1,0],[0,1],[0,-1]]
+    .map(([dx, dy]) => ({ x: x + dx, y: y + dy }))
+    .filter(p => p.x >= 0 && p.y >= 0 && p.x < state.w && p.y < state.h);
+}
+
+function passable(x, y) {
+  const t = state.grid[y][x].tile;
+  return WALKABLE.has(t);
+}
+
+function tileCost(x, y) {
+  const t = state.grid[y][x].tile;
+  if (LETHAL.has(t)) return 100;
+  if (t === TILE.WATER) return 3;
+  return 1;
+}
+
+function astar(sx, sy, gx, gy) {
+  const open = new Map();
+  const came = new Map();
+  const gScore = new Map();
+  const start = key(sx, sy);
+  const goal = key(gx, gy);
+  gScore.set(start, 0);
+  open.set(start, { x: sx, y: sy, f: Math.abs(sx - gx) + Math.abs(sy - gy) });
+
+  while (open.size) {
+    let curK = null, curF = Infinity;
+    for (const [k, v] of open) if (v.f < curF) { curF = v.f; curK = k; }
+    const cur = open.get(curK);
+    if (curK === goal) {
+      const path = [];
+      let k = curK;
+      while (k !== start) {
+        path.unshift({ x: k % 1000, y: Math.floor(k / 1000) });
+        k = came.get(k);
+      }
+      return path;
+    }
+    open.delete(curK);
+    for (const n of neighbors(cur.x, cur.y)) {
+      if (!passable(n.x, n.y)) continue;
+      const nk = key(n.x, n.y);
+      const tentative = gScore.get(curK) + tileCost(n.x, n.y);
+      if (tentative < (gScore.get(nk) ?? Infinity)) {
+        came.set(nk, curK);
+        gScore.set(nk, tentative);
+        const f = tentative + Math.abs(n.x - gx) + Math.abs(n.y - gy);
+        open.set(nk, { x: n.x, y: n.y, f });
+      }
+    }
+  }
+  return null;
+}
+
+function pickNextTarget() {
+  let best = null, bestLen = Infinity;
+  for (const tk of state.treasures) {
+    const tx = tk % 1000, ty = Math.floor(tk / 1000);
+    const p = astar(state.hero.x, state.hero.y, tx, ty);
+    if (p && p.length < bestLen && !pathHasLethal(p)) {
+      bestLen = p.length;
+      best = p;
+    }
+  }
+  if (best) return best;
+  return astar(state.hero.x, state.hero.y, state.exit.x, state.exit.y);
+}
+
+function pathHasLethal(path) {
+  for (const p of path) {
+    if (LETHAL.has(state.grid[p.y][p.x].tile)) return true;
+  }
+  return false;
+}
+
+function replan() {
+  if (!state.running || state.dead) return;
+  state.path = pickNextTarget() || [];
+}
+
+function startHero() {
+  state.running = true;
+  state.path = pickNextTarget() || [];
+  if (state.stepTimer) clearInterval(state.stepTimer);
+  state.stepTimer = setInterval(step, 260);
+}
+
+function step() {
+  if (!state.running || state.dead) return;
+  if (!state.path || state.path.length === 0) {
+    state.path = pickNextTarget() || [];
+    if (!state.path || state.path.length === 0) return;
+  }
+  const next = state.path.shift();
+  state.hero.x = next.x;
+  state.hero.y = next.y;
+  positionHero();
+
+  const tile = state.grid[next.y][next.x].tile;
+
+  const tk = key(next.x, next.y);
+  if (state.treasures.has(tk)) {
+    state.treasures.delete(tk);
+    state.gold += 10;
+    state.score += 10;
+    goldEl.textContent = state.gold;
+    scoreEl.textContent = state.score;
+    render();
+  }
+
+  if (LETHAL.has(tile)) {
+    die();
+    return;
+  }
+
+  if (tile === TILE.EXIT) {
+    win();
+    return;
+  }
+
+  if (state.path.length === 0) replan();
+}
+
+function die() {
+  state.dead = true;
+  state.running = false;
+  clearInterval(state.stepTimer);
+  state.stepTimer = null;
+  state.lives--;
+  livesEl.textContent = state.lives;
+  positionHero();
+  if (state.lives <= 0) {
+    msgEl.textContent = 'GAME OVER — hero fell. click RESET';
+    msgEl.className = 'lose';
+  } else {
+    msgEl.textContent = 'HERO DIED — retry level';
+    msgEl.className = 'lose';
+    setTimeout(() => loadLevel(state.levelIdx), 1200);
+  }
+}
+
+function win() {
+  state.running = false;
+  clearInterval(state.stepTimer);
+  state.stepTimer = null;
+  const bonus = state.treasures.size === 0 ? 50 : 0;
+  state.score += 25 + bonus;
+  scoreEl.textContent = state.score;
+  if (state.levelIdx + 1 >= LEVELS.length) {
+    msgEl.textContent = `VICTORY — final score ${state.score}`;
+    msgEl.className = 'win';
+  } else {
+    msgEl.textContent = `LEVEL CLEAR ${bonus ? '(PERFECT +50)' : ''}`;
+    msgEl.className = 'win';
+    nextBtn.style.display = 'inline-block';
+  }
+}
+
+resetBtn.onclick = () => {
+  state.gold = 0;
+  state.score = 0;
+  state.lives = 3;
+  loadLevel(0);
+};
+nextBtn.onclick = () => loadLevel(state.levelIdx + 1);
+
+loadLevel(0);
+</script>
+</body>
+</html>

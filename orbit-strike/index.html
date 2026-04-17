@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Orbit Strike</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #05060a;
+    color: #e8ecff;
+    font-family: "Menlo", "Consolas", monospace;
+    overflow: hidden;
+    height: 100%;
+  }
+  #game {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    cursor: none;
+  }
+  #hud {
+    position: fixed;
+    top: 12px;
+    left: 16px;
+    font-size: 14px;
+    letter-spacing: 2px;
+    text-shadow: 0 0 6px #3bf;
+    pointer-events: none;
+  }
+  #hud .row { margin-bottom: 4px; }
+  #hud b { color: #7cf; }
+  #overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    background: rgba(5, 6, 10, 0.78);
+    text-align: center;
+    pointer-events: none;
+  }
+  #overlay.hidden { display: none; }
+  #overlay h1 {
+    font-size: 44px;
+    margin: 0 0 8px;
+    letter-spacing: 10px;
+    color: #9fe8ff;
+    text-shadow: 0 0 18px #2ae, 0 0 42px #27f;
+  }
+  #overlay p {
+    margin: 6px 0;
+    font-size: 14px;
+    letter-spacing: 2px;
+    color: #b8c4ff;
+  }
+  #overlay .pulse {
+    margin-top: 20px;
+    font-size: 12px;
+    letter-spacing: 6px;
+    color: #7cf;
+    animation: pulse 1.1s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.35; }
+    50% { opacity: 1; }
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">
+  <div class="row">SCORE <b id="score">0</b></div>
+  <div class="row">WAVE <b id="wave">1</b></div>
+  <div class="row">HP <b id="hp">3</b></div>
+  <div class="row" style="opacity:0.6;font-size:11px;margin-top:10px">HOLD to extend tether · RELEASE to retract</div>
+</div>
+<div id="overlay">
+  <h1>ORBIT STRIKE</h1>
+  <p>Rotate. Extend. Smash.</p>
+  <p style="opacity:0.7">HOLD mouse / space to extend tether. Time it to crush incoming enemies.</p>
+  <p class="pulse">CLICK OR PRESS SPACE TO BEGIN</p>
+</div>
+<script>
+(() => {
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+  const overlay = document.getElementById("overlay");
+  const scoreEl = document.getElementById("score");
+  const waveEl = document.getElementById("wave");
+  const hpEl = document.getElementById("hp");
+
+  let W = 0, H = 0, cx = 0, cy = 0, DPR = Math.min(window.devicePixelRatio || 1, 2);
+  function resize() {
+    W = window.innerWidth;
+    H = window.innerHeight;
+    cx = W / 2;
+    cy = H / 2;
+    canvas.width = W * DPR;
+    canvas.height = H * DPR;
+    canvas.style.width = W + "px";
+    canvas.style.height = H + "px";
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  // ---------- Game State ----------
+  const state = {
+    running: false,
+    over: false,
+    score: 0,
+    wave: 1,
+    hp: 3,
+    spawnCooldown: 0,
+    waveTimer: 0,
+    shake: 0,
+    time: 0,
+  };
+
+  // Player: fixed at center, tethered projectile rotates around it
+  // Tether uses centrifugal-like physics:
+  // - Angular velocity driven by input (gentle spin-up from rotation by hand)
+  // - Actually we use pendulum-lite: angular velocity conserved, affected by radius (conservation-ish).
+  const player = {
+    angle: 0,
+    angVel: 5.0, // radians / sec
+    radius: 90,  // current tether length
+    minR: 90,
+    maxR: 340,
+    extending: false,
+    ballR: 16,
+    coreR: 22,
+  };
+
+  const enemies = [];
+  const particles = [];
+  const floats = [];
+
+  // ---------- Input ----------
+  let holdInput = false;
+  function setHold(v) { holdInput = v; player.extending = v; }
+
+  canvas.addEventListener("mousedown", e => { if (e.button === 0) onPress(); });
+  canvas.addEventListener("mouseup",   e => { if (e.button === 0) onRelease(); });
+  canvas.addEventListener("mouseleave", () => onRelease());
+  canvas.addEventListener("touchstart", e => { e.preventDefault(); onPress(); }, { passive: false });
+  canvas.addEventListener("touchend",   e => { e.preventDefault(); onRelease(); }, { passive: false });
+  window.addEventListener("keydown", e => {
+    if (e.code === "Space") { e.preventDefault(); onPress(); }
+  });
+  window.addEventListener("keyup", e => {
+    if (e.code === "Space") { e.preventDefault(); onRelease(); }
+  });
+
+  function onPress() {
+    if (!state.running) { start(); return; }
+    setHold(true);
+  }
+  function onRelease() {
+    setHold(false);
+  }
+
+  function start() {
+    state.running = true;
+    state.over = false;
+    state.score = 0;
+    state.wave = 1;
+    state.hp = 5;
+    state.spawnCooldown = 1.6;
+    state.waveTimer = 0;
+    enemies.length = 0;
+    particles.length = 0;
+    floats.length = 0;
+    player.angle = 0;
+    player.angVel = 5.0;
+    player.radius = player.minR;
+    overlay.classList.add("hidden");
+    updateHUD();
+  }
+
+  function gameOver() {
+    state.running = false;
+    state.over = true;
+    overlay.classList.remove("hidden");
+    overlay.innerHTML = `
+      <h1>SIGNAL LOST</h1>
+      <p>FINAL SCORE <b style="color:#9fe8ff">${state.score}</b></p>
+      <p>WAVE REACHED <b style="color:#9fe8ff">${state.wave}</b></p>
+      <p class="pulse">CLICK OR PRESS SPACE TO RESTART</p>
+    `;
+  }
+
+  // ---------- Enemies ----------
+  function spawnEnemy() {
+    // spawn from random edge, head toward center
+    const side = Math.random();
+    let x, y;
+    const pad = 40;
+    if (side < 0.25)      { x = -pad;        y = Math.random() * H; }
+    else if (side < 0.5)  { x = W + pad;     y = Math.random() * H; }
+    else if (side < 0.75) { x = Math.random() * W; y = -pad; }
+    else                  { x = Math.random() * W; y = H + pad; }
+
+    const dx = cx - x, dy = cy - y;
+    const d = Math.hypot(dx, dy) || 1;
+    const speedBase = 28 + state.wave * 4;
+    const speed = speedBase + Math.random() * 20;
+    const tough = Math.random() < Math.min(0.08 + state.wave * 0.02, 0.35);
+    const r = tough ? 22 : 14 + Math.random() * 6;
+    enemies.push({
+      x, y,
+      vx: (dx / d) * speed,
+      vy: (dy / d) * speed,
+      r,
+      hp: tough ? 2 : 1,
+      maxHp: tough ? 2 : 1,
+      tough,
+      hue: tough ? 340 : 18 + Math.random() * 20,
+      spin: (Math.random() - 0.5) * 4,
+      rot: Math.random() * Math.PI * 2,
+      flash: 0,
+    });
+  }
+
+  // ---------- Particles ----------
+  function burst(x, y, color, count, spd = 180) {
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = spd * (0.4 + Math.random() * 0.9);
+      particles.push({
+        x, y,
+        vx: Math.cos(a) * s,
+        vy: Math.sin(a) * s,
+        life: 0.4 + Math.random() * 0.5,
+        age: 0,
+        color,
+        size: 1 + Math.random() * 2.5,
+      });
+    }
+  }
+  function floatText(x, y, text, color) {
+    floats.push({ x, y, text, color, age: 0, life: 0.9 });
+  }
+
+  // ---------- Update ----------
+  function update(dt) {
+    state.time += dt;
+
+    // Extend / retract tether.
+    // Linear rate so input feels direct, not exponential-lazy.
+    const targetR = player.extending ? player.maxR : player.minR;
+    const extendRate = 520;  // px/sec outward
+    const retractRate = 900; // px/sec inward (snap back)
+    const prevR = player.radius;
+    if (player.radius < targetR) {
+      player.radius = Math.min(targetR, player.radius + extendRate * dt);
+    } else if (player.radius > targetR) {
+      player.radius = Math.max(targetR, player.radius - retractRate * dt);
+    }
+
+    // Conservation of angular momentum: omega_new = omega_old * (r_old^2 / r_new^2)
+    if (player.radius > 0.01 && Math.abs(player.radius - prevR) > 0.001) {
+      const ratio = (prevR * prevR) / (player.radius * player.radius);
+      player.angVel *= ratio;
+    }
+    // Very light drag so it doesn't spin forever, but doesn't kill momentum
+    player.angVel *= Math.pow(0.997, dt * 60);
+    // Spin floor — always feels responsive
+    const floor = 3.2;
+    if (player.angVel < floor) player.angVel = floor;
+    // Max cap to prevent extreme ratios after hard retract
+    if (player.angVel > 14) player.angVel = 14;
+
+    player.angle += player.angVel * dt;
+
+    // Ball world position
+    const bx = cx + Math.cos(player.angle) * player.radius;
+    const by = cy + Math.sin(player.angle) * player.radius;
+    player._bx = bx;
+    player._by = by;
+    // Ball velocity (tangent)
+    const tvx = -Math.sin(player.angle) * player.angVel * player.radius;
+    const tvy =  Math.cos(player.angle) * player.angVel * player.radius;
+    const ballSpeed = Math.hypot(tvx, tvy);
+
+    // Spawning
+    state.spawnCooldown -= dt;
+    state.waveTimer += dt;
+    const spawnRate = Math.max(0.55, 1.8 - state.wave * 0.08);
+    if (state.spawnCooldown <= 0) {
+      spawnEnemy();
+      state.spawnCooldown = spawnRate * (0.6 + Math.random() * 0.8);
+    }
+    // Wave advance
+    if (state.waveTimer > 18) {
+      state.waveTimer = 0;
+      state.wave++;
+      updateHUD();
+      floatText(cx, cy - 80, "WAVE " + state.wave, "#9fe8ff");
+    }
+
+    // Update enemies
+    for (let i = enemies.length - 1; i >= 0; i--) {
+      const e = enemies[i];
+      e.x += e.vx * dt;
+      e.y += e.vy * dt;
+      e.rot += e.spin * dt;
+      if (e.flash > 0) e.flash -= dt * 4;
+
+      // Hit core?
+      const ddx = e.x - cx, ddy = e.y - cy;
+      const dd = Math.hypot(ddx, ddy);
+      if (dd < e.r + player.coreR) {
+        // damage player
+        state.hp--;
+        updateHUD();
+        state.shake = Math.max(state.shake, 18);
+        burst(e.x, e.y, "#ff557a", 26, 240);
+        enemies.splice(i, 1);
+        if (state.hp <= 0) {
+          burst(cx, cy, "#9fe8ff", 80, 320);
+          gameOver();
+          return;
+        }
+        continue;
+      }
+
+      // Hit by tether ball?
+      const bxd = e.x - bx, byd = e.y - by;
+      const bd = Math.hypot(bxd, byd);
+      if (bd < e.r + player.ballR) {
+        e.hp--;
+        e.flash = 1;
+        // knockback
+        const nx = bxd / (bd || 1), ny = byd / (bd || 1);
+        const impact = Math.min(ballSpeed * 0.35, 600);
+        e.vx = nx * impact;
+        e.vy = ny * impact;
+        burst(e.x, e.y, "hsl(" + e.hue + ",80%,65%)", 10, 140);
+        if (e.hp <= 0) {
+          const gained = e.tough ? 50 : 15;
+          // speed bonus: faster ball = more points
+          const bonus = Math.round(ballSpeed / 60);
+          state.score += gained + bonus;
+          floatText(e.x, e.y, "+" + (gained + bonus), "#9fe8ff");
+          burst(e.x, e.y, "hsl(" + e.hue + ",90%,70%)", 26, 260);
+          state.shake = Math.max(state.shake, 6);
+          enemies.splice(i, 1);
+          updateHUD();
+        }
+        continue;
+      }
+
+      // Hit tether line (segment core->ball)?
+      // Approximate with distance from point to segment.
+      const hitR = e.r + 3;
+      const d2 = pointSegDist(e.x, e.y, cx, cy, bx, by);
+      if (d2 < hitR) {
+        e.hp--;
+        e.flash = 1;
+        // push outward from center
+        const dx2 = e.x - cx, dy2 = e.y - cy;
+        const ml = Math.hypot(dx2, dy2) || 1;
+        e.vx += (dx2 / ml) * 160;
+        e.vy += (dy2 / ml) * 160;
+        burst(e.x, e.y, "hsl(" + e.hue + ",80%,65%)", 6, 100);
+        if (e.hp <= 0) {
+          const gained = e.tough ? 40 : 10;
+          state.score += gained;
+          floatText(e.x, e.y, "+" + gained, "#c8d6ff");
+          burst(e.x, e.y, "hsl(" + e.hue + ",90%,70%)", 18, 220);
+          enemies.splice(i, 1);
+          updateHUD();
+        }
+        continue;
+      }
+
+      // Offscreen cleanup
+      if (e.x < -200 || e.x > W + 200 || e.y < -200 || e.y > H + 200) {
+        enemies.splice(i, 1);
+      }
+    }
+
+    // Particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.age += dt;
+      if (p.age >= p.life) { particles.splice(i, 1); continue; }
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= 0.96;
+      p.vy *= 0.96;
+    }
+    // Floats
+    for (let i = floats.length - 1; i >= 0; i--) {
+      const f = floats[i];
+      f.age += dt;
+      if (f.age >= f.life) { floats.splice(i, 1); continue; }
+      f.y -= 28 * dt;
+    }
+
+    // Shake decay
+    if (state.shake > 0) state.shake = Math.max(0, state.shake - dt * 40);
+  }
+
+  function pointSegDist(px, py, ax, ay, bx, by) {
+    const dx = bx - ax, dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    if (len2 < 0.0001) return Math.hypot(px - ax, py - ay);
+    let t = ((px - ax) * dx + (py - ay) * dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    const qx = ax + dx * t, qy = ay + dy * t;
+    return Math.hypot(px - qx, py - qy);
+  }
+
+  // ---------- Render ----------
+  function render() {
+    // Shake offset
+    let sx = 0, sy = 0;
+    if (state.shake > 0) {
+      sx = (Math.random() - 0.5) * state.shake;
+      sy = (Math.random() - 0.5) * state.shake;
+    }
+
+    // Background: radial fade + orbit rings
+    ctx.clearRect(0, 0, W, H);
+    const g = ctx.createRadialGradient(cx, cy, 20, cx, cy, Math.max(W, H) * 0.7);
+    g.addColorStop(0, "#0b1126");
+    g.addColorStop(0.6, "#05070f");
+    g.addColorStop(1, "#02030a");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.save();
+    ctx.translate(sx, sy);
+
+    // Orbit rings
+    ctx.lineWidth = 1;
+    for (let i = 1; i <= 4; i++) {
+      const rr = (player.maxR / 4) * i;
+      ctx.strokeStyle = "rgba(120,180,255," + (0.05 + i * 0.02) + ")";
+      ctx.beginPath();
+      ctx.arc(cx, cy, rr, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Outer reach ring (current max)
+    ctx.strokeStyle = "rgba(120,220,255,0.18)";
+    ctx.setLineDash([4, 8]);
+    ctx.beginPath();
+    ctx.arc(cx, cy, player.maxR, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Tether + ball
+    const bx = player._bx, by = player._by;
+
+    // Tether glow
+    ctx.save();
+    ctx.lineCap = "round";
+    // outer glow
+    ctx.strokeStyle = "rgba(120,220,255,0.18)";
+    ctx.lineWidth = 10;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(bx, by);
+    ctx.stroke();
+    // inner line
+    ctx.strokeStyle = player.extending ? "#ffd07a" : "#8fd7ff";
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(bx, by);
+    ctx.stroke();
+    ctx.restore();
+
+    // Core (player)
+    ctx.save();
+    // pulsing glow
+    const pulse = 1 + Math.sin(state.time * 4) * 0.12;
+    const grad = ctx.createRadialGradient(cx, cy, 2, cx, cy, player.coreR * 2.4 * pulse);
+    grad.addColorStop(0, "rgba(180,230,255,0.9)");
+    grad.addColorStop(0.4, "rgba(80,170,255,0.35)");
+    grad.addColorStop(1, "rgba(80,170,255,0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, player.coreR * 2.4 * pulse, 0, Math.PI * 2);
+    ctx.fill();
+
+    // core body: triangle rotating opposite
+    ctx.translate(cx, cy);
+    ctx.rotate(-player.angle * 0.5);
+    ctx.fillStyle = "#e8f6ff";
+    ctx.strokeStyle = "#6cc4ff";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI * 2 - Math.PI / 2;
+      const r = player.coreR;
+      if (i === 0) ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+      else ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+
+    // Ball (projectile)
+    ctx.save();
+    const bgrad = ctx.createRadialGradient(bx, by, 1, bx, by, player.ballR * 3);
+    bgrad.addColorStop(0, "rgba(255,230,160,0.9)");
+    bgrad.addColorStop(0.5, "rgba(255,160,60,0.35)");
+    bgrad.addColorStop(1, "rgba(255,100,40,0)");
+    ctx.fillStyle = bgrad;
+    ctx.beginPath();
+    ctx.arc(bx, by, player.ballR * 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#fff3c8";
+    ctx.strokeStyle = "#ffb24a";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(bx, by, player.ballR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+
+    // Enemies
+    for (const e of enemies) {
+      ctx.save();
+      ctx.translate(e.x, e.y);
+      ctx.rotate(e.rot);
+      const flash = e.flash > 0 ? e.flash : 0;
+      const baseCol = "hsl(" + e.hue + ", 80%, " + (55 + flash * 30) + "%)";
+      const edge = "hsl(" + e.hue + ", 90%, " + (70 + flash * 20) + "%)";
+      ctx.fillStyle = baseCol;
+      ctx.strokeStyle = edge;
+      ctx.lineWidth = 2;
+      if (e.tough) {
+        // hex
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2;
+          const x = Math.cos(a) * e.r;
+          const y = Math.sin(a) * e.r;
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+      } else {
+        // diamond/square
+        ctx.beginPath();
+        for (let i = 0; i < 4; i++) {
+          const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+          const x = Math.cos(a) * e.r;
+          const y = Math.sin(a) * e.r;
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+      }
+      ctx.fill();
+      ctx.stroke();
+      // inner core
+      ctx.fillStyle = "rgba(255,255,255,0.6)";
+      ctx.beginPath();
+      ctx.arc(0, 0, e.r * 0.28, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      // hp pip for tough
+      if (e.maxHp > 1) {
+        ctx.fillStyle = "#fff";
+        ctx.font = "10px Menlo, monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(e.hp + "", e.x, e.y - e.r - 6);
+      }
+    }
+
+    // Particles
+    for (const p of particles) {
+      const a = 1 - p.age / p.life;
+      ctx.globalAlpha = a;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Floats
+    for (const f of floats) {
+      const a = 1 - f.age / f.life;
+      ctx.globalAlpha = a;
+      ctx.fillStyle = f.color;
+      ctx.font = "bold 16px Menlo, monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(f.text, f.x, f.y);
+    }
+    ctx.globalAlpha = 1;
+
+    ctx.restore();
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = state.score;
+    waveEl.textContent = state.wave;
+    hpEl.textContent = state.hp;
+  }
+
+  // ---------- Loop ----------
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.033, (now - last) / 1000);
+    last = now;
+    if (state.running) update(dt);
+    render();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  // Idle render: show core spinning even before start
+  (function idleSpin() {
+    player._bx = cx + Math.cos(player.angle) * player.radius;
+    player._by = cy + Math.sin(player.angle) * player.radius;
+  })();
+
+  // keep angle advancing during menu for visual life
+  setInterval(() => {
+    if (!state.running) {
+      player.angle += 0.03;
+      player._bx = cx + Math.cos(player.angle) * player.radius;
+      player._by = cy + Math.sin(player.angle) * player.radius;
+    }
+  }, 16);
+
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Hex-Linker</title>
+<style>
+  :root {
+    --bg: #0b0e17;
+    --bg2: #141a2b;
+    --cell: #1e2638;
+    --cell-hi: #2a3450;
+    --ink: #e8ecf8;
+    --muted: #8892b5;
+    --accent: #7ee0ff;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: radial-gradient(circle at 50% 20%, var(--bg2), var(--bg));
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+    user-select: none;
+    touch-action: none;
+  }
+  #app {
+    display: flex; flex-direction: column;
+    height: 100vh; width: 100vw;
+    align-items: center;
+  }
+  header {
+    width: 100%;
+    padding: 14px 20px 8px;
+    display: flex; justify-content: space-between; align-items: center;
+    max-width: 560px;
+  }
+  h1 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    color: var(--accent);
+    text-transform: uppercase;
+  }
+  .info { font-size: 13px; color: var(--muted); }
+  .info b { color: var(--ink); font-weight: 600; }
+  #stage {
+    flex: 1;
+    width: 100%;
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+  }
+  svg { display: block; width: min(92vw, 560px); height: min(92vw, 560px); max-height: 70vh; }
+  footer {
+    padding: 12px 16px 22px;
+    display: flex; gap: 10px;
+    width: 100%;
+    max-width: 560px;
+    justify-content: center;
+  }
+  button {
+    background: var(--cell);
+    color: var(--ink);
+    border: 1px solid #2d3957;
+    padding: 10px 18px;
+    font-size: 14px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-family: inherit;
+    letter-spacing: 0.5px;
+    transition: background 0.15s;
+  }
+  button:hover { background: var(--cell-hi); }
+  button:active { transform: scale(0.97); }
+  .pill {
+    background: var(--cell);
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  #toast {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%) scale(0.8);
+    background: rgba(20,26,43,0.95);
+    border: 1px solid var(--accent);
+    padding: 20px 30px;
+    border-radius: 16px;
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--accent);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s, transform 0.3s;
+    text-align: center;
+  }
+  #toast.show {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  #toast small { display:block; font-size: 13px; color: var(--muted); margin-top:6px; font-weight: 400; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Hex‑Linker</h1>
+    <div class="info">Level <b id="lvl">1</b> · <span class="pill" id="timer">0s</span></div>
+  </header>
+  <div id="stage">
+    <svg id="board" viewBox="-260 -260 520 520"></svg>
+    <div id="toast"></div>
+  </div>
+  <footer>
+    <button id="reset">Reset</button>
+    <button id="solve">Solve</button>
+    <button id="skip">Skip</button>
+  </footer>
+</div>
+<script>
+// ---------- Hex grid (axial coordinates) ----------
+const SIZE = 32;
+const SQRT3 = Math.sqrt(3);
+
+function axialToPixel(q, r) {
+  return {
+    x: SIZE * SQRT3 * (q + r / 2),
+    y: SIZE * 1.5 * r
+  };
+}
+function hexKey(q, r) { return q + "," + r; }
+const DIRS = [
+  [+1, 0], [+1, -1], [0, -1],
+  [-1, 0], [-1, +1], [0, +1]
+];
+function neighbors(q, r) { return DIRS.map(([dq, dr]) => [q + dq, r + dr]); }
+
+function buildHexagon(radius) {
+  const cells = [];
+  for (let q = -radius; q <= radius; q++) {
+    for (let r = -radius; r <= radius; r++) {
+      if (Math.abs(q + r) <= radius) cells.push([q, r]);
+    }
+  }
+  return cells;
+}
+
+function hexPolygonPoints(cx, cy, size) {
+  const pts = [];
+  for (let i = 0; i < 6; i++) {
+    const a = Math.PI / 180 * (60 * i - 30);
+    pts.push((cx + size * Math.cos(a)).toFixed(2) + "," + (cy + size * Math.sin(a)).toFixed(2));
+  }
+  return pts.join(" ");
+}
+
+// ---------- Levels (procedurally generated, deterministic by seed) ----------
+// Mulberry32 RNG
+function rng(seed) {
+  return function () {
+    let t = seed += 0x6D2B79F5;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const COLORS = ["#ff6b9d","#7ee0ff","#ffe066","#7bed9f","#c56cff","#ff9f43","#54a0ff"];
+
+// Generate a level: pick cells in a small hex, partition some into pair endpoints
+// ensuring at least one non-crossing solution exists by carving disjoint random walks.
+function generateLevel(levelNum) {
+  // Keep board small; scale difficulty via pair count & path length
+  const radius = levelNum < 4 ? 2 : 3;
+  const maxPairs = radius === 2 ? 4 : 6;
+  const pairCount = Math.min(2 + Math.floor((levelNum - 1) / 2), maxPairs);
+  const seedBase = levelNum * 9173 + 42;
+
+  const cells = buildHexagon(radius);
+  const totalCells = cells.length;
+  const inBounds = (q, r) => Math.abs(q) <= radius && Math.abs(r) <= radius && Math.abs(q + r) <= radius;
+
+  // Try many seeds until we fully tile the board with exactly `pairCount` paths
+  for (let attempt = 0; attempt < 400; attempt++) {
+    const r = rng(seedBase + attempt);
+    const occupied = new Map();
+    const endpoints = [];
+    let ok = true;
+
+    // Target path lengths that sum to totalCells
+    const minLen = 2;
+    const lens = new Array(pairCount).fill(minLen);
+    let remaining = totalCells - pairCount * minLen;
+    while (remaining > 0) {
+      lens[Math.floor(r() * pairCount)]++;
+      remaining--;
+    }
+
+    for (let p = 0; p < pairCount; p++) {
+      const free = cells.filter(([q, rr]) => !occupied.has(hexKey(q, rr)));
+      if (free.length < lens[p]) { ok = false; break; }
+      // Prefer starting from a corner/edge of free region
+      const start = free[Math.floor(r() * free.length)];
+      const path = [start];
+      const pathSet = new Set([hexKey(start[0], start[1])]);
+
+      // Greedy walk, preferring moves that don't cut off tiny unreachable pockets
+      let stuck = false;
+      for (let step = 1; step < lens[p]; step++) {
+        const [cq, cr] = path[path.length - 1];
+        const options = neighbors(cq, cr).filter(([nq, nr]) => {
+          const k = hexKey(nq, nr);
+          return inBounds(nq, nr) && !pathSet.has(k) && !occupied.has(k);
+        });
+        if (options.length === 0) { stuck = true; break; }
+        // Warnsdorff-ish: prefer option with fewest onward options to hug edges
+        options.sort((a, b) => {
+          const score = (cell) => neighbors(cell[0], cell[1]).filter(([nq, nr]) => {
+            const k = hexKey(nq, nr);
+            return inBounds(nq, nr) && !pathSet.has(k) && !occupied.has(k);
+          }).length;
+          return score(a) - score(b);
+        });
+        // Pick among the best few with some randomness
+        const pickFrom = options.slice(0, Math.max(1, Math.ceil(options.length / 2)));
+        const next = pickFrom[Math.floor(r() * pickFrom.length)];
+        path.push(next);
+        pathSet.add(hexKey(next[0], next[1]));
+      }
+      if (stuck || path.length !== lens[p]) { ok = false; break; }
+      for (const [q, rr] of path) occupied.set(hexKey(q, rr), p);
+      endpoints.push({ colorIdx: p, a: path[0], b: path[path.length - 1], solution: path.slice() });
+    }
+
+    if (ok && occupied.size === totalCells && endpoints.length === pairCount) {
+      return { radius, endpoints, totalCells };
+    }
+  }
+  // Fallback
+  return {
+    radius: 2,
+    totalCells: buildHexagon(2).length,
+    endpoints: [
+      { colorIdx: 0, a: [-2, 0], b: [2, 0] },
+      { colorIdx: 1, a: [0, -2], b: [0, 2] },
+      { colorIdx: 2, a: [-1, -1], b: [1, 1] }
+    ]
+  };
+}
+
+// ---------- State ----------
+let level = 1;
+let data = null;
+let cellMap = new Map(); // key -> {q,r,x,y,el}
+let paths = new Map(); // colorIdx -> [[q,r],...]
+let currentDrag = null; // {colorIdx, path:[]}
+let startTime = 0;
+let timerId = null;
+
+const svg = document.getElementById("board");
+const toast = document.getElementById("toast");
+const lvlEl = document.getElementById("lvl");
+const timerEl = document.getElementById("timer");
+
+function loadLevel(n) {
+  level = n;
+  lvlEl.textContent = n;
+  data = generateLevel(n);
+  paths.clear();
+  currentDrag = null;
+  renderBoard();
+  startTime = Date.now();
+  if (timerId) clearInterval(timerId);
+  timerId = setInterval(() => {
+    timerEl.textContent = Math.floor((Date.now() - startTime) / 1000) + "s";
+  }, 200);
+}
+
+function renderBoard() {
+  svg.innerHTML = "";
+  cellMap.clear();
+
+  const cells = buildHexagon(data.radius);
+  // Fit viewBox tightly around the actual hex extent
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const [q, r] of cells) {
+    const { x, y } = axialToPixel(q, r);
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+  }
+  const pad = SIZE * 1.1;
+  const vbX = minX - pad, vbY = minY - pad;
+  const vbW = (maxX - minX) + pad * 2;
+  const vbH = (maxY - minY) + pad * 2;
+  svg.setAttribute("viewBox", `${vbX} ${vbY} ${vbW} ${vbH}`);
+  svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+
+  const gCells = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  gCells.setAttribute("id", "cells");
+  svg.appendChild(gCells);
+
+  const gPaths = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  gPaths.setAttribute("id", "paths");
+  svg.appendChild(gPaths);
+
+  const gNodes = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  gNodes.setAttribute("id", "nodes");
+  svg.appendChild(gNodes);
+
+  for (const [q, r] of cells) {
+    const { x, y } = axialToPixel(q, r);
+    const poly = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+    poly.setAttribute("points", hexPolygonPoints(x, y, SIZE * 0.95));
+    poly.setAttribute("fill", "var(--cell)");
+    poly.setAttribute("stroke", "#2d3957");
+    poly.setAttribute("stroke-width", "1.5");
+    gCells.appendChild(poly);
+    cellMap.set(hexKey(q, r), { q, r, x, y, el: poly });
+  }
+
+  // Endpoint nodes
+  for (const ep of data.endpoints) {
+    for (const p of [ep.a, ep.b]) {
+      const { x, y } = axialToPixel(p[0], p[1]);
+      const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      c.setAttribute("cx", x);
+      c.setAttribute("cy", y);
+      c.setAttribute("r", SIZE * 0.55);
+      c.setAttribute("fill", COLORS[ep.colorIdx % COLORS.length]);
+      c.setAttribute("stroke", "#0b0e17");
+      c.setAttribute("stroke-width", "3");
+      c.dataset.color = ep.colorIdx;
+      c.dataset.q = p[0];
+      c.dataset.r = p[1];
+      c.style.cursor = "pointer";
+      gNodes.appendChild(c);
+    }
+  }
+}
+
+function redrawPaths() {
+  const gPaths = document.getElementById("paths");
+  gPaths.innerHTML = "";
+  const drawPath = (colorIdx, pts, active) => {
+    if (pts.length < 1) return;
+    const color = COLORS[colorIdx % COLORS.length];
+    let d = "";
+    pts.forEach(([q, r], i) => {
+      const { x, y } = axialToPixel(q, r);
+      d += (i === 0 ? "M" : "L") + x + "," + y + " ";
+    });
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", d);
+    path.setAttribute("stroke", color);
+    path.setAttribute("stroke-width", SIZE * 0.65);
+    path.setAttribute("stroke-linecap", "round");
+    path.setAttribute("stroke-linejoin", "round");
+    path.setAttribute("fill", "none");
+    path.setAttribute("opacity", active ? "0.75" : "0.9");
+    gPaths.appendChild(path);
+  };
+  for (const [idx, pts] of paths) drawPath(idx, pts, false);
+  if (currentDrag) drawPath(currentDrag.colorIdx, currentDrag.path, true);
+}
+
+// Cell occupied by any path (other than the currently dragging one)
+function occupiedBy(q, r, exceptIdx) {
+  const k = hexKey(q, r);
+  for (const [idx, pts] of paths) {
+    if (idx === exceptIdx) continue;
+    for (const [pq, pr] of pts) if (hexKey(pq, pr) === k) return idx;
+  }
+  return -1;
+}
+
+function isEndpointOf(q, r, colorIdx) {
+  const ep = data.endpoints[colorIdx];
+  return (ep.a[0] === q && ep.a[1] === r) || (ep.b[0] === q && ep.b[1] === r);
+}
+function isAnyEndpoint(q, r) {
+  for (let i = 0; i < data.endpoints.length; i++) {
+    if (isEndpointOf(q, r, i)) return i;
+  }
+  return -1;
+}
+
+// ---------- Input ----------
+function pointToCell(clientX, clientY) {
+  const pt = svg.createSVGPoint();
+  pt.x = clientX; pt.y = clientY;
+  const loc = pt.matrixTransform(svg.getScreenCTM().inverse());
+  // Find nearest cell
+  let best = null, bestD = Infinity;
+  for (const cell of cellMap.values()) {
+    const dx = cell.x - loc.x, dy = cell.y - loc.y;
+    const d = dx * dx + dy * dy;
+    if (d < bestD) { bestD = d; best = cell; }
+  }
+  if (best && bestD < (SIZE * SIZE)) return best;
+  return null;
+}
+
+function areAdjacent(a, b) {
+  return neighbors(a[0], a[1]).some(([q, r]) => q === b[0] && r === b[1]);
+}
+
+function onDown(e) {
+  e.preventDefault();
+  const t = e.touches ? e.touches[0] : e;
+  const cell = pointToCell(t.clientX, t.clientY);
+  if (!cell) return;
+  const epIdx = isAnyEndpoint(cell.q, cell.r);
+  if (epIdx === -1) {
+    // Start from middle of existing path? Remove and restart
+    for (const [idx, pts] of paths) {
+      const i = pts.findIndex(([q, r]) => q === cell.q && r === cell.r);
+      if (i !== -1) {
+        paths.delete(idx);
+        redrawPaths();
+        return;
+      }
+    }
+    return;
+  }
+  // Remove any existing path for this color
+  paths.delete(epIdx);
+  currentDrag = { colorIdx: epIdx, path: [[cell.q, cell.r]] };
+  redrawPaths();
+}
+
+function onMove(e) {
+  if (!currentDrag) return;
+  e.preventDefault();
+  const t = e.touches ? e.touches[0] : e;
+  const cell = pointToCell(t.clientX, t.clientY);
+  if (!cell) return;
+  const path = currentDrag.path;
+  const last = path[path.length - 1];
+  if (last[0] === cell.q && last[1] === cell.r) return;
+
+  // Backtrack
+  if (path.length >= 2) {
+    const prev = path[path.length - 2];
+    if (prev[0] === cell.q && prev[1] === cell.r) {
+      path.pop();
+      redrawPaths();
+      return;
+    }
+  }
+
+  if (!areAdjacent(last, [cell.q, cell.r])) return;
+
+  // Cannot step on another color's path
+  const occ = occupiedBy(cell.q, cell.r, currentDrag.colorIdx);
+  if (occ !== -1) return;
+
+  // Cannot step on another color's endpoint
+  const epIdx = isAnyEndpoint(cell.q, cell.r);
+  if (epIdx !== -1 && epIdx !== currentDrag.colorIdx) return;
+
+  // Cannot revisit own path
+  if (path.some(([q, r]) => q === cell.q && r === cell.r)) return;
+
+  path.push([cell.q, cell.r]);
+
+  // Auto-complete if we hit the other endpoint
+  if (epIdx === currentDrag.colorIdx) {
+    const ep = data.endpoints[currentDrag.colorIdx];
+    const start = path[0];
+    const otherEnd = (start[0] === ep.a[0] && start[1] === ep.a[1]) ? ep.b : ep.a;
+    if (cell.q === otherEnd[0] && cell.r === otherEnd[1]) {
+      paths.set(currentDrag.colorIdx, path.slice());
+      currentDrag = null;
+      redrawPaths();
+      checkWin();
+      return;
+    }
+  }
+  redrawPaths();
+}
+
+function onUp(e) {
+  if (!currentDrag) return;
+  // If the last cell is the other endpoint, commit; else discard
+  const path = currentDrag.path;
+  const ep = data.endpoints[currentDrag.colorIdx];
+  const start = path[0];
+  const last = path[path.length - 1];
+  const isComplete =
+    (last[0] === ep.a[0] && last[1] === ep.a[1] && !(start[0] === ep.a[0] && start[1] === ep.a[1])) ||
+    (last[0] === ep.b[0] && last[1] === ep.b[1] && !(start[0] === ep.b[0] && start[1] === ep.b[1]));
+  if (isComplete && path.length >= 2) {
+    paths.set(currentDrag.colorIdx, path.slice());
+  }
+  currentDrag = null;
+  redrawPaths();
+  checkWin();
+}
+
+function checkWin() {
+  if (paths.size !== data.endpoints.length) return;
+  for (let i = 0; i < data.endpoints.length; i++) {
+    if (!paths.has(i)) return;
+  }
+  // Every cell must be covered
+  let covered = 0;
+  for (const pts of paths.values()) covered += pts.length;
+  if (covered !== data.totalCells) return;
+  const elapsed = Math.floor((Date.now() - startTime) / 1000);
+  showToast(`Level ${level} Cleared`, `${elapsed}s`);
+  clearInterval(timerId);
+  setTimeout(() => { hideToast(); loadLevel(level + 1); }, 1400);
+}
+
+function showToast(title, sub) {
+  toast.innerHTML = title + (sub ? `<small>${sub}</small>` : "");
+  toast.classList.add("show");
+}
+function hideToast() { toast.classList.remove("show"); }
+
+svg.addEventListener("mousedown", onDown);
+svg.addEventListener("mousemove", onMove);
+window.addEventListener("mouseup", onUp);
+svg.addEventListener("touchstart", onDown, { passive: false });
+svg.addEventListener("touchmove", onMove, { passive: false });
+window.addEventListener("touchend", onUp);
+
+document.getElementById("reset").addEventListener("click", () => loadLevel(level));
+document.getElementById("skip").addEventListener("click", () => loadLevel(level + 1));
+document.getElementById("solve").addEventListener("click", () => {
+  if (!data) return;
+  paths.clear();
+  currentDrag = null;
+  for (const ep of data.endpoints) {
+    if (ep.solution) paths.set(ep.colorIdx, ep.solution.slice());
+  }
+  redrawPaths();
+  checkWin();
+});
+
+loadLevel(1);
+</script>
+</body>
+</html>

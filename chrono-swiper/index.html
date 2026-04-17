@@ -1,0 +1,770 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
+<meta name="theme-color" content="#05060a" />
+<title>Chrono-Swipe</title>
+<style>
+  :root { --bg:#05060a; --fg:#e9f1ff; --accent:#7cf7ff; --warn:#ff4d6d; --gold:#ffd166; }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; width: 100%;
+    background: var(--bg); color: var(--fg);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    overflow: hidden; overscroll-behavior: none;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: none;
+  }
+  #game {
+    position: fixed; inset: 0; width: 100vw; height: 100vh; display: block;
+    background: radial-gradient(ellipse at 50% 30%, #0a1430 0%, #05060a 70%);
+  }
+  #ui {
+    position: fixed; inset: 0; pointer-events: none;
+    display: flex; flex-direction: column; justify-content: space-between;
+    padding: env(safe-area-inset-top, 12px) 16px env(safe-area-inset-bottom, 12px) 16px;
+  }
+  .top {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    font-size: 14px; letter-spacing: 1px; opacity: 0.9;
+  }
+  .stat { background: rgba(10,18,40,0.55); border: 1px solid rgba(124,247,255,0.2);
+          padding: 6px 10px; border-radius: 8px; backdrop-filter: blur(6px); }
+  .stat b { color: var(--accent); }
+  .bottom { display: flex; justify-content: center; align-items: flex-end; }
+  .hint { font-size: 12px; opacity: 0.55; text-align: center; }
+  #overlay {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    justify-content: center; align-items: center; text-align: center;
+    background: rgba(5,6,10,0.78); backdrop-filter: blur(8px);
+    padding: 24px; pointer-events: auto;
+  }
+  #overlay.hidden { display: none; }
+  #overlay h1 { font-size: 40px; margin: 0 0 4px; letter-spacing: 4px; color: var(--accent);
+                text-shadow: 0 0 18px rgba(124,247,255,0.5); }
+  #overlay p { margin: 6px 0; opacity: 0.85; max-width: 320px; font-size: 14px; line-height: 1.5; }
+  #overlay .score-big { font-size: 56px; color: var(--gold); margin: 8px 0; letter-spacing: 2px; }
+  #overlay .sub { opacity: 0.7; font-size: 13px; }
+  #overlay button {
+    margin-top: 18px; padding: 14px 32px; font-size: 18px; letter-spacing: 3px;
+    background: var(--accent); color: #021018; border: none; border-radius: 10px;
+    font-family: inherit; font-weight: 700; cursor: pointer;
+    box-shadow: 0 0 24px rgba(124,247,255,0.45);
+  }
+  #overlay button:active { transform: scale(0.97); }
+  .chrono #game { filter: saturate(1.4) hue-rotate(-10deg); }
+  .flash { animation: flash 0.18s ease-out; }
+  @keyframes flash { 0% { filter: brightness(2.2); } 100% { filter: brightness(1); } }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="ui">
+  <div class="top">
+    <div class="stat">SCORE <b id="score">0</b></div>
+    <div class="stat">BEST <b id="best">0</b></div>
+    <div class="stat">CHRONO <b id="chrono">100%</b></div>
+  </div>
+  <div class="bottom"><div class="hint" id="hint">SWIPE to steer · HOLD to Chrono-Shift</div></div>
+</div>
+<div id="overlay">
+  <h1>CHRONO-SWIPE</h1>
+  <p>Thread the gaps at velocity. Swipe left/right to steer. Hold anywhere to slow time to 20%. Chrono meter drains when held, refills when released.</p>
+  <div class="score-big" id="finalScore" style="display:none">0</div>
+  <div class="sub" id="finalSub" style="display:none"></div>
+  <button id="startBtn">START</button>
+</div>
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const bestEl = document.getElementById('best');
+  const chronoEl = document.getElementById('chrono');
+  const overlay = document.getElementById('overlay');
+  const startBtn = document.getElementById('startBtn');
+  const finalScore = document.getElementById('finalScore');
+  const finalSub = document.getElementById('finalSub');
+  const hint = document.getElementById('hint');
+
+  let DPR = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+  let W = 0, H = 0;
+
+  function resize() {
+    DPR = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = Math.floor(W * DPR);
+    canvas.height = Math.floor(H * DPR);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize, { passive: true });
+  resize();
+
+  // ---------- Game state ----------
+  const state = {
+    running: false,
+    t: 0,              // wall time seconds
+    gameTime: 0,       // dilated time seconds
+    dt: 0,
+    timeScale: 1,
+    chrono: 1,         // 0..1 meter
+    chronoActive: false,
+    score: 0,
+    best: Number(localStorage.getItem('chrono_best') || 0),
+    multiplier: 1,
+    // player
+    px: 0, py: 0,      // screen coords
+    pxTarget: 0,
+    pvx: 0,
+    trail: [],
+    // world
+    speedBase: 520,    // px/sec at scale 1
+    speedBoost: 0,
+    distance: 0,       // virtual forward distance
+    obstacles: [],     // {y (world y), type, ...}
+    particles: [],
+    nextObstacleAt: 0,
+    // input
+    pointerDown: false,
+    pointerStartX: 0, pointerStartY: 0, pointerStartT: 0,
+    lastPointerX: 0,
+    holdTimer: 0,
+    // shake
+    shake: 0,
+    // near-miss streak
+    lastNearMiss: -999,
+    streak: 0,
+    // death
+    deadAt: 0,
+    // track width (x lane)
+    trackMargin: 28,
+  };
+
+  bestEl.textContent = state.best | 0;
+
+  // ---------- Procedural obstacle generation ----------
+  // World uses "world Y" that increases forward. Player at world Y = distance.
+  // Obstacles exist at world Y positions ahead of player.
+  // Screen mapping: screenY = H - PLAYER_BASE_OFFSET - (obstacle.worldY - distance)
+  // So obstacles with worldY > distance are above player; they scroll down as distance grows.
+  const PLAYER_BASE = 120; // px from bottom
+
+  // Obstacle types: "wall" (full width with a single gap), "slab" (two walls with gap between),
+  // "comb" (multiple narrow pillars), "diag" (pair of diagonal-ish offsets forming narrow gap)
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function randInt(a, b) { return Math.floor(rand(a, b + 1)); }
+  function choice(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+  function difficulty() {
+    // 0 .. ~1.5 as distance grows
+    return Math.min(1.6, state.distance / 12000);
+  }
+
+  function spawnObstacle(worldY) {
+    const d = difficulty();
+    const minGap = 110 - d * 50;          // px, narrows with difficulty
+    const maxGap = 190 - d * 60;
+    const usable = W - state.trackMargin * 2;
+    const gap = Math.max(70, rand(minGap, maxGap));
+    const types = ['wall', 'wall', 'slab', 'comb', 'diag'];
+    if (d < 0.35) types.splice(types.indexOf('comb'), 1);
+    if (d < 0.15) { types.length = 0; types.push('wall'); }
+    const type = choice(types);
+    const thickness = rand(22, 36);
+    const color = `hsl(${200 + Math.random()*40}, 90%, ${55 + Math.random()*10}%)`;
+
+    if (type === 'wall') {
+      const gapX = rand(state.trackMargin + gap/2, W - state.trackMargin - gap/2);
+      state.obstacles.push({ type:'wall', worldY, thickness, gapX, gap, color, passed:false });
+    } else if (type === 'slab') {
+      const gapX = rand(state.trackMargin + gap/2 + 40, W - state.trackMargin - gap/2 - 40);
+      state.obstacles.push({ type:'wall', worldY, thickness, gapX, gap, color, passed:false });
+      // second staggered wall shortly after
+      const worldY2 = worldY + rand(180, 260);
+      const gapX2 = rand(state.trackMargin + gap/2, W - state.trackMargin - gap/2);
+      state.obstacles.push({ type:'wall', worldY: worldY2, thickness, gapX: gapX2, gap: gap * 1.05, color, passed:false });
+    } else if (type === 'comb') {
+      // several pillars with gaps; pick one wide gap, rest narrow
+      const count = randInt(3, 5);
+      const laneW = usable / count;
+      const openIdx = randInt(0, count - 1);
+      for (let i = 0; i < count; i++) {
+        if (i === openIdx) continue;
+        const x = state.trackMargin + laneW * i + laneW / 2;
+        state.obstacles.push({
+          type:'pillar', worldY, thickness, x,
+          halfW: laneW / 2 - 14, color, passed:false,
+        });
+      }
+    } else if (type === 'diag') {
+      // two walls close together, gap shifts across
+      const gx1 = rand(state.trackMargin + gap/2, W - state.trackMargin - gap/2);
+      let gx2 = gx1 + (Math.random() < 0.5 ? -1 : 1) * rand(120, 220);
+      gx2 = Math.max(state.trackMargin + gap/2, Math.min(W - state.trackMargin - gap/2, gx2));
+      state.obstacles.push({ type:'wall', worldY, thickness, gapX: gx1, gap, color, passed:false });
+      state.obstacles.push({ type:'wall', worldY: worldY + rand(140, 200), thickness, gapX: gx2, gap: gap * 0.95, color, passed:false });
+    }
+  }
+
+  function scheduleNextObstacle(fromY) {
+    const d = difficulty();
+    const spacing = rand(340 - d * 90, 520 - d * 140);
+    const base = (fromY != null) ? fromY : state.distance;
+    state.nextObstacleAt = base + spacing;
+  }
+
+  // ---------- Input ----------
+  function onPointerDown(e) {
+    if (!state.running) return;
+    const p = getPoint(e);
+    state.pointerDown = true;
+    state.pointerStartX = p.x;
+    state.pointerStartY = p.y;
+    state.pointerStartT = performance.now();
+    state.lastPointerX = p.x;
+    state.holdTimer = 0;
+    e.preventDefault();
+  }
+  function onPointerMove(e) {
+    if (!state.running || !state.pointerDown) return;
+    const p = getPoint(e);
+    const dx = p.x - state.lastPointerX;
+    state.lastPointerX = p.x;
+    // steering: direct horizontal drag control
+    state.pxTarget = clamp(state.pxTarget + dx, state.trackMargin + 14, W - state.trackMargin - 14);
+    e.preventDefault();
+  }
+  function onPointerUp(e) {
+    state.pointerDown = false;
+    state.chronoActive = false;
+    e && e.preventDefault && e.preventDefault();
+  }
+  function getPoint(e) {
+    if (e.touches && e.touches[0]) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    if (e.changedTouches && e.changedTouches[0]) return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+    return { x: e.clientX, y: e.clientY };
+  }
+  canvas.addEventListener('touchstart', onPointerDown, { passive: false });
+  canvas.addEventListener('touchmove', onPointerMove, { passive: false });
+  canvas.addEventListener('touchend', onPointerUp, { passive: false });
+  canvas.addEventListener('touchcancel', onPointerUp, { passive: false });
+  canvas.addEventListener('mousedown', onPointerDown);
+  window.addEventListener('mousemove', onPointerMove);
+  window.addEventListener('mouseup', onPointerUp);
+  // keyboard fallback
+  const keys = { left:false, right:false, space:false };
+  window.addEventListener('keydown', (e) => {
+    if (!state.running && (e.key === ' ' || e.key === 'Enter')) { startGame(); return; }
+    if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = true;
+    if (e.key === 'ArrowRight' || e.key === 'd') keys.right = true;
+    if (e.key === ' ' || e.key === 'Shift') { keys.space = true; state.chronoActive = state.chrono > 0.02; }
+  });
+  window.addEventListener('keyup', (e) => {
+    if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = false;
+    if (e.key === 'ArrowRight' || e.key === 'd') keys.right = false;
+    if (e.key === ' ' || e.key === 'Shift') { keys.space = false; state.chronoActive = false; }
+  });
+
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+
+  // ---------- Core loop ----------
+  let lastT = performance.now();
+  function startGame() {
+    state.running = true;
+    state.t = 0;
+    state.gameTime = 0;
+    state.score = 0;
+    state.multiplier = 1;
+    state.chrono = 1;
+    state.chronoActive = false;
+    state.distance = 0;
+    state.obstacles.length = 0;
+    state.particles.length = 0;
+    state.trail.length = 0;
+    state.px = W / 2;
+    state.pxTarget = W / 2;
+    state.pvx = 0;
+    state.nextObstacleAt = H * 1.2;
+    state.shake = 0;
+    state.streak = 0;
+    state.lastNearMiss = -999;
+    state.deadAt = 0;
+    overlay.classList.add('hidden');
+    finalScore.style.display = 'none';
+    finalSub.style.display = 'none';
+    lastT = performance.now();
+    requestAnimationFrame(loop);
+  }
+  startBtn.addEventListener('click', startGame);
+
+  function endGame() {
+    state.running = false;
+    if (state.score > state.best) {
+      state.best = state.score | 0;
+      localStorage.setItem('chrono_best', String(state.best));
+      bestEl.textContent = state.best;
+      finalSub.textContent = 'NEW PERSONAL BEST';
+    } else {
+      finalSub.textContent = 'BEST ' + state.best;
+    }
+    finalScore.textContent = state.score | 0;
+    finalScore.style.display = 'block';
+    finalSub.style.display = 'block';
+    startBtn.textContent = 'RETRY';
+    hint.textContent = 'Tap RETRY to dive back in';
+    overlay.classList.remove('hidden');
+  }
+
+  function loop(now) {
+    const realDt = Math.min(0.05, (now - lastT) / 1000);
+    lastT = now;
+    update(realDt);
+    render();
+    if (state.running) requestAnimationFrame(loop);
+  }
+
+  function update(realDt) {
+    state.t += realDt;
+
+    // Chrono meter
+    if (state.chronoActive && state.chrono > 0) {
+      state.chrono = Math.max(0, state.chrono - realDt * 0.55);
+      if (state.chrono <= 0) state.chronoActive = false;
+    } else {
+      state.chrono = Math.min(1, state.chrono + realDt * 0.32);
+    }
+    // target time scale
+    const targetScale = state.chronoActive ? 0.2 : 1.0;
+    state.timeScale += (targetScale - state.timeScale) * Math.min(1, realDt * 14);
+    state.dt = realDt * state.timeScale;
+    state.gameTime += state.dt;
+
+    // keyboard steering
+    const kbAccel = 1800;
+    if (keys.left)  state.pxTarget -= kbAccel * realDt;
+    if (keys.right) state.pxTarget += kbAccel * realDt;
+    state.pxTarget = clamp(state.pxTarget, state.trackMargin + 14, W - state.trackMargin - 14);
+
+    // smooth player x toward target (tight but not instant)
+    const followK = state.chronoActive ? 18 : 14;
+    const prevPx = state.px;
+    state.px += (state.pxTarget - state.px) * Math.min(1, realDt * followK);
+    state.pvx = (state.px - prevPx) / Math.max(0.0001, realDt);
+
+    // forward motion (uses dilated time)
+    const fwdSpeed = state.speedBase + Math.min(380, state.distance * 0.02) + state.speedBoost;
+    state.distance += fwdSpeed * state.dt;
+
+    // score: 1 per px forward * multiplier; chrono doubles rate
+    const scoreRate = (state.chronoActive ? 2.2 : 1.0) * state.multiplier;
+    state.score += fwdSpeed * state.dt * 0.1 * scoreRate;
+
+    // spawn obstacles
+    let spawnGuard = 0;
+    while (state.nextObstacleAt < state.distance + H * 1.8 && spawnGuard++ < 20) {
+      const wy = state.nextObstacleAt;
+      spawnObstacle(wy);
+      scheduleNextObstacle(wy);
+    }
+    // cull passed obstacles
+    const playerWorldY = state.distance;
+    for (const o of state.obstacles) {
+      if (!o.passed && o.worldY < playerWorldY - 10) {
+        o.passed = true;
+        // near-miss detection on this obstacle
+        const nm = checkNearMiss(o);
+        if (nm > 0) {
+          state.score += nm * 40 * state.multiplier;
+          state.streak = Math.min(9, state.streak + 1);
+          state.multiplier = 1 + state.streak * 0.15;
+          state.lastNearMiss = state.t;
+          spawnBurst(state.px, H - PLAYER_BASE, nm);
+        }
+      }
+    }
+    state.obstacles = state.obstacles.filter(o => o.worldY > playerWorldY - H);
+
+    // collisions
+    const playerR = 10;
+    for (const o of state.obstacles) {
+      const screenY = H - PLAYER_BASE - (o.worldY - playerWorldY);
+      if (screenY < -60 || screenY > H + 60) continue;
+      if (hitsObstacle(o, state.px, H - PLAYER_BASE, playerR, screenY)) {
+        die();
+        return;
+      }
+    }
+
+    // trail
+    state.trail.push({ x: state.px, y: H - PLAYER_BASE, t: state.t, chrono: state.chronoActive });
+    if (state.trail.length > 60) state.trail.shift();
+
+    // particles
+    for (const p of state.particles) {
+      p.x += p.vx * realDt;
+      p.y += p.vy * realDt + (state.chronoActive ? 0 : 40 * realDt);
+      p.life -= realDt;
+    }
+    state.particles = state.particles.filter(p => p.life > 0);
+    if (state.particles.length > 400) state.particles.length = 400;
+
+    // streak decay
+    if (state.t - state.lastNearMiss > 2.5 && state.streak > 0) {
+      state.streak = Math.max(0, state.streak - 1);
+      state.multiplier = 1 + state.streak * 0.15;
+      state.lastNearMiss = state.t - 1.5;
+    }
+
+    // shake decay
+    state.shake *= Math.pow(0.001, realDt);
+
+    // UI
+    scoreEl.textContent = state.score | 0;
+    chronoEl.textContent = Math.round(state.chrono * 100) + '%';
+    document.body.classList.toggle('chrono', state.chronoActive);
+  }
+
+  function hitsObstacle(o, px, py, r, screenY) {
+    if (o.type === 'wall') {
+      // horizontal bar across screen with a gap
+      const top = screenY - o.thickness/2;
+      const bot = screenY + o.thickness/2;
+      if (py + r < top || py - r > bot) return false;
+      // inside vertical band — check gap
+      const gapL = o.gapX - o.gap/2;
+      const gapR = o.gapX + o.gap/2;
+      // if fully inside gap with margin, safe
+      if (px - r > gapL && px + r < gapR) return false;
+      return true;
+    } else if (o.type === 'pillar') {
+      const top = screenY - o.thickness/2;
+      const bot = screenY + o.thickness/2;
+      if (py + r < top || py - r > bot) return false;
+      const l = o.x - o.halfW;
+      const rr = o.x + o.halfW;
+      if (px + r < l || px - r > rr) return false;
+      return true;
+    }
+    return false;
+  }
+
+  function checkNearMiss(o) {
+    // called when player passes an obstacle; evaluate closest edge distance
+    const px = state.px;
+    if (o.type === 'wall') {
+      const gapL = o.gapX - o.gap/2;
+      const gapR = o.gapX + o.gap/2;
+      const dL = Math.abs(px - gapL);
+      const dR = Math.abs(px - gapR);
+      const closest = Math.min(dL, dR);
+      if (closest < 16) return 3;
+      if (closest < 28) return 2;
+      if (closest < 44) return 1;
+      return 0;
+    } else if (o.type === 'pillar') {
+      const dL = Math.abs(px - (o.x - o.halfW));
+      const dR = Math.abs(px - (o.x + o.halfW));
+      const c = Math.min(dL, dR);
+      if (c < 14) return 2;
+      if (c < 26) return 1;
+      return 0;
+    }
+    return 0;
+  }
+
+  function spawnBurst(x, y, intensity) {
+    const n = 8 + intensity * 6;
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = rand(80, 260);
+      state.particles.push({
+        x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 60,
+        life: rand(0.35, 0.7), max: 0.7,
+        color: intensity >= 3 ? '#ffd166' : '#7cf7ff',
+        r: rand(1.5, 3),
+      });
+    }
+  }
+
+  function die() {
+    if (!state.running) return;
+    state.shake = 18;
+    // explosion
+    for (let i = 0; i < 60; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = rand(120, 520);
+      state.particles.push({
+        x: state.px, y: H - PLAYER_BASE,
+        vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+        life: rand(0.5, 1.1), max: 1.1,
+        color: i % 3 === 0 ? '#ff4d6d' : (i % 3 === 1 ? '#ffd166' : '#7cf7ff'),
+        r: rand(1.5, 3.5),
+      });
+    }
+    document.body.classList.add('flash');
+    setTimeout(() => document.body.classList.remove('flash'), 200);
+    state.deadAt = state.t;
+    // brief cinematic
+    const die_t0 = performance.now();
+    const oldTimeScale = state.timeScale;
+    const drain = () => {
+      const now = performance.now();
+      const k = Math.min(1, (now - die_t0) / 600);
+      state.timeScale = oldTimeScale * (1 - k);
+      state.dt = 0;
+      // keep particles updating in real time
+      for (const p of state.particles) {
+        p.x += p.vx * 0.016; p.y += p.vy * 0.016 + 40 * 0.016;
+        p.life -= 0.016;
+      }
+      state.particles = state.particles.filter(p => p.life > 0);
+      render();
+      if (k < 1) requestAnimationFrame(drain);
+      else endGame();
+    };
+    state.running = false;
+    requestAnimationFrame(drain);
+  }
+
+  // ---------- Render ----------
+  function render() {
+    // background
+    ctx.save();
+    const shakeX = (Math.random() - 0.5) * state.shake;
+    const shakeY = (Math.random() - 0.5) * state.shake;
+    ctx.translate(shakeX, shakeY);
+
+    // clear
+    ctx.fillStyle = '#05060a';
+    ctx.fillRect(0, 0, W, H);
+
+    drawStars();
+    drawTrackEdges();
+    drawScrollLines();
+    drawObstacles();
+    drawTrail();
+    drawPlayer();
+    drawParticles();
+    drawHUD();
+
+    ctx.restore();
+  }
+
+  // starfield parallax
+  const stars = [];
+  for (let i = 0; i < 120; i++) {
+    stars.push({ x: Math.random(), y: Math.random(), z: Math.random() * 0.8 + 0.2 });
+  }
+  function drawStars() {
+    for (const s of stars) {
+      const sx = s.x * W;
+      let sy = (s.y * H + (state.distance * 0.2 * s.z)) % H;
+      if (sy < 0) sy += H;
+      ctx.globalAlpha = 0.3 + 0.6 * s.z;
+      ctx.fillStyle = state.chronoActive ? '#a9f4ff' : '#cfd8ff';
+      ctx.fillRect(sx, sy, s.z * 2, s.z * 2);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawTrackEdges() {
+    const m = state.trackMargin;
+    ctx.strokeStyle = 'rgba(124,247,255,0.25)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(m, 0); ctx.lineTo(m, H);
+    ctx.moveTo(W - m, 0); ctx.lineTo(W - m, H);
+    ctx.stroke();
+  }
+
+  function drawScrollLines() {
+    // fast-moving center stripe pattern for speed feel
+    const spacing = 80;
+    const offset = (state.distance * 1.0) % spacing;
+    ctx.strokeStyle = state.chronoActive ? 'rgba(124,247,255,0.25)' : 'rgba(124,247,255,0.12)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let y = -spacing + offset; y < H + spacing; y += spacing) {
+      ctx.moveTo(W/2, y);
+      ctx.lineTo(W/2, y + 30);
+    }
+    ctx.stroke();
+  }
+
+  function drawObstacles() {
+    const playerWorldY = state.distance;
+    for (const o of state.obstacles) {
+      const screenY = H - PLAYER_BASE - (o.worldY - playerWorldY);
+      if (screenY < -80 || screenY > H + 80) continue;
+      if (o.type === 'wall') {
+        drawWall(o, screenY);
+      } else if (o.type === 'pillar') {
+        drawPillar(o, screenY);
+      }
+    }
+  }
+
+  function drawWall(o, y) {
+    const m = state.trackMargin;
+    const gapL = o.gapX - o.gap/2;
+    const gapR = o.gapX + o.gap/2;
+    const th = o.thickness;
+    // glow
+    ctx.save();
+    ctx.fillStyle = o.color;
+    ctx.shadowColor = o.color;
+    ctx.shadowBlur = state.chronoActive ? 24 : 10;
+    // left segment
+    ctx.fillRect(m, y - th/2, gapL - m, th);
+    // right segment
+    ctx.fillRect(gapR, y - th/2, (W - m) - gapR, th);
+    ctx.restore();
+
+    // gap guide lines (subtle)
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(gapL, y - th/2 - 6); ctx.lineTo(gapL, y + th/2 + 6);
+    ctx.moveTo(gapR, y - th/2 - 6); ctx.lineTo(gapR, y + th/2 + 6);
+    ctx.stroke();
+  }
+
+  function drawPillar(o, y) {
+    const th = o.thickness;
+    ctx.save();
+    ctx.fillStyle = o.color;
+    ctx.shadowColor = o.color;
+    ctx.shadowBlur = state.chronoActive ? 22 : 9;
+    ctx.fillRect(o.x - o.halfW, y - th/2, o.halfW * 2, th);
+    ctx.restore();
+  }
+
+  function drawTrail() {
+    if (state.trail.length < 2) return;
+    ctx.lineCap = 'round';
+    for (let i = 1; i < state.trail.length; i++) {
+      const a = state.trail[i - 1];
+      const b = state.trail[i];
+      const k = i / state.trail.length;
+      ctx.strokeStyle = b.chrono
+        ? `rgba(124,247,255,${0.08 + k * 0.55})`
+        : `rgba(255,209,102,${0.05 + k * 0.45})`;
+      ctx.lineWidth = 2 + k * 6;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    }
+  }
+
+  function drawPlayer() {
+    const x = state.px, y = H - PLAYER_BASE;
+    // glow halo
+    ctx.save();
+    const pulse = 8 + Math.sin(state.t * 18) * 2;
+    ctx.shadowBlur = state.chronoActive ? 30 : 18;
+    ctx.shadowColor = state.chronoActive ? '#7cf7ff' : '#ffd166';
+    ctx.fillStyle = state.chronoActive ? '#a9f4ff' : '#fff6c9';
+    ctx.beginPath();
+    ctx.arc(x, y, 8, 0, Math.PI * 2);
+    ctx.fill();
+    // outer ring
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = state.chronoActive ? 'rgba(124,247,255,0.7)' : 'rgba(255,209,102,0.6)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x, y, pulse + 4, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawParticles() {
+    for (const p of state.particles) {
+      const a = Math.max(0, p.life / (p.max || 0.7));
+      ctx.globalAlpha = a;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawHUD() {
+    // chrono bar
+    const bw = Math.min(260, W - 48);
+    const bx = (W - bw) / 2;
+    const by = H - 22 - (window.innerHeight - H);
+    const baseY = H - 28;
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    ctx.fillRect(bx, baseY, bw, 6);
+    ctx.fillStyle = state.chronoActive ? '#7cf7ff' : (state.chrono > 0.3 ? '#cfd8ff' : '#ff4d6d');
+    ctx.fillRect(bx, baseY, bw * state.chrono, 6);
+
+    // multiplier
+    if (state.multiplier > 1.01) {
+      ctx.fillStyle = '#ffd166';
+      ctx.font = 'bold 18px ui-monospace, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('x' + state.multiplier.toFixed(2), W/2, baseY - 12);
+    }
+
+    // near-miss flash text
+    const sinceNM = state.t - state.lastNearMiss;
+    if (sinceNM < 0.5) {
+      const a = 1 - sinceNM / 0.5;
+      ctx.globalAlpha = a;
+      ctx.fillStyle = '#ffd166';
+      ctx.font = 'bold 14px ui-monospace, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('NEAR MISS', W/2, H/2 - 40);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // touch hold -> chrono: if pointer down for >90ms without much movement, enable chrono
+  function pointerTick(realDt) {
+    if (state.pointerDown && state.chrono > 0.02) {
+      state.holdTimer += realDt;
+      // also allow instant chrono if user is barely moving
+      if (state.holdTimer > 0.05) state.chronoActive = true;
+    }
+  }
+
+  // splice pointerTick into loop via update wrapper
+  const origUpdate = update;
+  update = function(realDt) {
+    pointerTick(realDt);
+    origUpdate(realDt);
+  };
+
+  // prevent context menu & pinch
+  window.addEventListener('contextmenu', e => e.preventDefault());
+  document.addEventListener('gesturestart', e => e.preventDefault());
+
+  // initial idle render (starfield) — pause when tab hidden
+  let idleRAF = 0;
+  function idle() {
+    if (state.running) return;
+    state.distance += 1;
+    render();
+    idleRAF = requestAnimationFrame(idle);
+  }
+  idle();
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      cancelAnimationFrame(idleRAF);
+    } else if (!state.running) {
+      idle();
+    }
+  });
+
+})();
+</script>
+</body>
+</html>

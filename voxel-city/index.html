@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Voxel City — WFC</title>
+    <link rel="stylesheet" href="style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="c"></canvas>
+      <div id="ui">
+        <h1>Voxel City</h1>
+        <p class="hint">Click grid to place. Drag to orbit. Scroll to zoom.</p>
+        <div id="palette"></div>
+        <div class="row">
+          <button id="reset">Reset</button>
+          <button id="autofill">Auto-fill</button>
+        </div>
+        <div class="row">
+          <label><input type="checkbox" id="showGrid" checked /> Grid</label>
+        </div>
+        <div id="stats"></div>
+      </div>
+    </div>
+    <script type="module" src="main.js"></script>
+  </body>
+</html>
