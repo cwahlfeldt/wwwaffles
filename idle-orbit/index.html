@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<title>Idle Orbit</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<canvas id="space"></canvas>
+
+<div id="hud">
+  <div class="res-row">
+    <div class="res" id="res-data"><span class="icon">◈</span><span class="val">0</span><span class="lbl">Data</span></div>
+    <div class="res" id="res-alloy"><span class="icon">⬢</span><span class="val">0</span><span class="lbl">Alloy</span></div>
+    <div class="res" id="res-rate"><span class="icon">↑</span><span class="val">0</span><span class="lbl">/s</span></div>
+  </div>
+  <div class="planet-info">
+    <div class="pname" id="planet-name">Kepler-0</div>
+    <div class="plvl">Facility Lvl <span id="planet-lvl">1</span></div>
+  </div>
+</div>
+
+<div id="launcher">
+  <div class="launch-hint">Drag from planet to launch satellite</div>
+  <div class="launch-cost">Cost: <span id="launch-cost">10</span> Alloy</div>
+  <div class="bp-slot" id="bp-slot">
+    <div class="bp-label">Blueprint</div>
+    <div class="bp-name" id="bp-name">Scout MK-I</div>
+    <div class="bp-stats" id="bp-stats">◈ 1/s · ⬢ 0.1/s</div>
+  </div>
+</div>
+
+<div id="sidebar">
+  <div class="tab-row">
+    <button class="tab active" data-tab="upgrades">Upgrades</button>
+    <button class="tab" data-tab="blueprints">Blueprints</button>
+    <button class="tab" data-tab="discover">Discover</button>
+  </div>
+  <div class="tab-pane active" id="tab-upgrades">
+    <div class="up-item" data-up="satPower">
+      <div class="up-head"><span class="up-name">Transmitter Gain</span><span class="up-lvl">Lv <span>1</span></span></div>
+      <div class="up-desc">+20% Data per satellite</div>
+      <button class="up-buy">Buy <span class="cost">50 ◈</span></button>
+    </div>
+    <div class="up-item" data-up="alloyYield">
+      <div class="up-head"><span class="up-name">Mining Array</span><span class="up-lvl">Lv <span>1</span></span></div>
+      <div class="up-desc">+25% Alloy rate</div>
+      <button class="up-buy">Buy <span class="cost">30 ⬢</span></button>
+    </div>
+    <div class="up-item" data-up="orbitStability">
+      <div class="up-head"><span class="up-name">Orbit Stability</span><span class="up-lvl">Lv <span>1</span></span></div>
+      <div class="up-desc">Slower orbit decay, +10% yield</div>
+      <button class="up-buy">Buy <span class="cost">100 ◈</span></button>
+    </div>
+    <div class="up-item" data-up="facility">
+      <div class="up-head"><span class="up-name">Planet Facility</span><span class="up-lvl">Lv <span>1</span></span></div>
+      <div class="up-desc">+1 max satellite slot, global +15%</div>
+      <button class="up-buy">Buy <span class="cost">500 ◈ / 200 ⬢</span></button>
+    </div>
+    <div class="up-item" data-up="launchDiscount">
+      <div class="up-head"><span class="up-name">Launch Pad</span><span class="up-lvl">Lv <span>1</span></span></div>
+      <div class="up-desc">-10% launch cost</div>
+      <button class="up-buy">Buy <span class="cost">80 ⬢</span></button>
+    </div>
+  </div>
+  <div class="tab-pane" id="tab-blueprints">
+    <div class="bp-list" id="bp-list"></div>
+    <div class="bp-roll">
+      <button id="btn-roll">Research Blueprint <span class="cost">250 ◈</span></button>
+      <div class="bp-roll-hint">Unlock rare satellite designs</div>
+    </div>
+  </div>
+  <div class="tab-pane" id="tab-discover">
+    <div class="disc-head">Star System Scan</div>
+    <div class="disc-body" id="disc-body">
+      <div class="disc-progress"><div class="disc-fill" id="disc-fill"></div></div>
+      <div class="disc-label" id="disc-label">Scanning... 0%</div>
+    </div>
+    <div class="disc-log" id="disc-log"></div>
+  </div>
+</div>
+
+<div id="toast-stack"></div>
+
+<script src="game.js"></script>
+</body>
+</html>

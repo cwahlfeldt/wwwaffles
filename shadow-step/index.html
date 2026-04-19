@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Shadow-Step</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; color: #e8e8e8; }
+  #game { position: fixed; inset: 0; display: block; touch-action: none; }
+  .overlay { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; text-align: center; background: rgba(0,0,0,0.85); backdrop-filter: blur(6px); z-index: 10; }
+  .hidden { display: none; }
+  h1 { font-size: clamp(32px, 8vw, 56px); font-weight: 200; letter-spacing: 0.4em; margin-bottom: 8px; }
+  h2 { font-size: clamp(20px, 5vw, 28px); font-weight: 300; letter-spacing: 0.2em; margin-bottom: 16px; }
+  p { font-size: clamp(13px, 3.5vw, 16px); font-weight: 300; letter-spacing: 0.08em; line-height: 1.6; max-width: 420px; margin-bottom: 8px; color: #aaa; }
+  .btn { margin-top: 20px; padding: 14px 36px; border: 1px solid #e8e8e8; background: transparent; color: #e8e8e8; font-size: 14px; letter-spacing: 0.3em; cursor: pointer; transition: all 0.2s; font-family: inherit; }
+  .btn:hover, .btn:active { background: #e8e8e8; color: #000; }
+  .btn.small { padding: 8px 18px; font-size: 12px; letter-spacing: 0.2em; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-top: 12px; }
+  #hud { position: fixed; top: 0; left: 0; right: 0; padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; pointer-events: none; z-index: 5; font-size: 12px; letter-spacing: 0.25em; font-weight: 300; }
+  #hud .stat { background: rgba(0,0,0,0.4); padding: 6px 12px; border: 1px solid rgba(232,232,232,0.2); }
+  #timer { font-variant-numeric: tabular-nums; }
+  .beat-indicator { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; z-index: 5; pointer-events: none; }
+  .pip { width: 10px; height: 10px; border: 1px solid rgba(232,232,232,0.3); border-radius: 50%; }
+  .pip.active { background: #e8e8e8; border-color: #e8e8e8; transform: scale(1.3); transition: transform 0.1s; }
+  .pip.dark { background: transparent; }
+  #leaderboard { max-height: 240px; overflow-y: auto; width: 100%; max-width: 340px; margin: 12px 0; }
+  .lb-row { display: flex; justify-content: space-between; padding: 6px 12px; font-size: 13px; letter-spacing: 0.1em; border-bottom: 1px solid rgba(232,232,232,0.1); }
+  .lb-row.you { color: #ffd166; }
+  .suits { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin: 16px 0; }
+  .suit { width: 64px; height: 64px; border: 1px solid rgba(232,232,232,0.3); display: flex; align-items: center; justify-content: center; font-size: 10px; letter-spacing: 0.1em; cursor: pointer; position: relative; }
+  .suit.owned { border-color: #e8e8e8; }
+  .suit.active { background: #e8e8e8; color: #000; }
+  .suit.locked { opacity: 0.3; cursor: not-allowed; }
+  .suit-dot { width: 28px; height: 28px; border-radius: 50%; }
+  .flash { animation: flash 0.4s ease-out; }
+  @keyframes flash { 0% { background: rgba(255,50,50,0.5); } 100% { background: rgba(0,0,0,0.85); } }
+  .tiny { font-size: 11px; color: #666; letter-spacing: 0.15em; margin-top: 20px; }
+  input[type=text] { background: transparent; border: none; border-bottom: 1px solid #888; color: #e8e8e8; font-size: 16px; padding: 6px; text-align: center; font-family: inherit; letter-spacing: 0.2em; width: 180px; outline: none; }
+  input[type=text]:focus { border-color: #e8e8e8; }
+</style>
+</head>
+<body>
+
+<canvas id="game"></canvas>
+
+<div id="hud" class="hidden">
+  <div class="stat">FLOOR <span id="floor">1</span></div>
+  <div class="stat" id="timer">30.0</div>
+  <div class="stat">FLOW <span id="flow">0</span></div>
+</div>
+
+<div class="beat-indicator hidden" id="beats"></div>
+
+<div id="menu" class="overlay">
+  <h1>SHADOW</h1>
+  <h2>STEP</h2>
+  <p>Tap in sync with the dark beats to move.</p>
+  <p>Move during light — alarm triggers.</p>
+  <p>Reach the exit before 30 seconds.</p>
+  <div class="row">
+    <button class="btn" id="playBtn">PLAY</button>
+  </div>
+  <div class="row">
+    <button class="btn small" id="suitsBtn">SUITS</button>
+    <button class="btn small" id="lbBtn">GHOST RUNS</button>
+    <button class="btn small" id="howBtn">HOW TO PLAY</button>
+  </div>
+  <div class="tiny" id="nameLine">
+    <input type="text" id="nameInput" maxlength="12" placeholder="YOUR NAME">
+  </div>
+</div>
+
+<div id="how" class="overlay hidden">
+  <h2>HOW TO PLAY</h2>
+  <p><strong>TAP</strong> anywhere to step forward one tile.</p>
+  <p><strong>DARK BEAT</strong> (pip off): safe to move.</p>
+  <p><strong>LIGHT BEAT</strong> (pip on): moving = alarm.</p>
+  <p>Perfect timing builds <strong>FLOW</strong>. Chain flow for bonus score.</p>
+  <p>Reach the exit tile before the timer runs out.</p>
+  <button class="btn" id="howBack">BACK</button>
+</div>
+
+<div id="suitsScreen" class="overlay hidden">
+  <h2>SUITS</h2>
+  <p id="suitsHint">Unlock by completing floors.</p>
+  <div class="suits" id="suitsGrid"></div>
+  <button class="btn" id="suitsBack">BACK</button>
+</div>
+
+<div id="lbScreen" class="overlay hidden">
+  <h2>GHOST RUNS</h2>
+  <div id="leaderboard"></div>
+  <button class="btn small" id="clearLb">CLEAR</button>
+  <button class="btn" id="lbBack">BACK</button>
+</div>
+
+<div id="result" class="overlay hidden">
+  <h2 id="resultTitle">ESCAPED</h2>
+  <p id="resultLine1">Floor 1</p>
+  <p id="resultLine2">Score 0 · Flow 0</p>
+  <p id="resultLine3" class="tiny"></p>
+  <div class="row">
+    <button class="btn" id="nextBtn">NEXT FLOOR</button>
+    <button class="btn small" id="menuBtn">MENU</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  let W, H, DPR;
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W * DPR;
+    canvas.height = H * DPR;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // --- State ---
+  const State = {
+    MENU: 'menu', PLAY: 'play', RESULT: 'result'
+  };
+  let state = State.MENU;
+
+  const save = {
+    name: '',
+    best: {},       // floor -> best ms remaining
+    totalFlow: 0,
+    suitsUnlocked: ['default'],
+    activeSuit: 'default',
+    ghosts: []      // [{name, floor, score, flow, time}]
+  };
+
+  function load() {
+    try {
+      const raw = localStorage.getItem('shadowstep.save.v1');
+      if (raw) Object.assign(save, JSON.parse(raw));
+    } catch {}
+  }
+  function persist() {
+    try { localStorage.setItem('shadowstep.save.v1', JSON.stringify(save)); } catch {}
+  }
+  load();
+
+  // --- Suits ---
+  const SUITS = [
+    { id: 'default',  name: 'INITIATE', color: '#e8e8e8', unlock: 0 },
+    { id: 'crimson',  name: 'CRIMSON',  color: '#d94848', unlock: 3 },
+    { id: 'azure',    name: 'AZURE',    color: '#4d8de8', unlock: 6 },
+    { id: 'verdant',  name: 'VERDANT',  color: '#5cc16b', unlock: 10 },
+    { id: 'gold',     name: 'GOLDEN',   color: '#ffd166', unlock: 15 },
+    { id: 'void',     name: 'VOID',     color: '#0a0a0a', unlock: 20, stroke: '#e8e8e8' },
+    { id: 'phantom',  name: 'PHANTOM',  color: '#b48aff', unlock: 25 },
+    { id: 'inferno',  name: 'INFERNO',  color: '#ff7a1a', unlock: 30 }
+  ];
+
+  function maxFloorCleared() {
+    const keys = Object.keys(save.best).map(Number);
+    return keys.length ? Math.max(...keys) : 0;
+  }
+
+  function refreshSuits() {
+    const cleared = maxFloorCleared();
+    SUITS.forEach(s => {
+      if (cleared >= s.unlock && !save.suitsUnlocked.includes(s.id)) {
+        save.suitsUnlocked.push(s.id);
+      }
+    });
+    persist();
+  }
+
+  // --- Rhythm engine ---
+  const BPM_BASE = 96;
+  // pattern: 1 = light (danger), 0 = dark (safe). Index = beat.
+  // Floor generates a 16-beat pattern with increasing light density.
+  let pattern = [];
+  let beatIndex = 0;
+  let beatStart = 0;
+  let beatDur = 0;   // ms per beat
+  let audio = null;
+
+  function initAudio() {
+    if (audio) return;
+    try {
+      audio = new (window.AudioContext || window.webkitAudioContext)();
+    } catch {}
+  }
+
+  function click(freq, dur, vol) {
+    if (!audio) return;
+    const o = audio.createOscillator();
+    const g = audio.createGain();
+    o.type = 'sine';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(vol, audio.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + dur);
+    o.connect(g); g.connect(audio.destination);
+    o.start();
+    o.stop(audio.currentTime + dur);
+  }
+
+  function tone(freq, dur, vol, type) {
+    if (!audio) return;
+    const o = audio.createOscillator();
+    const g = audio.createGain();
+    o.type = type || 'triangle';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0, audio.currentTime);
+    g.gain.linearRampToValueAtTime(vol, audio.currentTime + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + dur);
+    o.connect(g); g.connect(audio.destination);
+    o.start();
+    o.stop(audio.currentTime + dur);
+  }
+
+  function buildPattern(floor) {
+    const len = 16;
+    const p = new Array(len).fill(0);
+    // base: every 4th beat is light (downbeat = expose)
+    for (let i = 0; i < len; i += 4) p[i] = 1;
+    // add more lights as floor increases
+    const extras = Math.min(6, Math.floor(floor / 2));
+    for (let k = 0; k < extras; k++) {
+      let idx = (k * 7 + floor * 3) % len;
+      if (!p[idx]) p[idx] = 1;
+    }
+    return p;
+  }
+
+  // --- Level ---
+  let floor = 1;
+  let tiles = 0;
+  let playerTile = 0;
+  let timeLeft = 30000; // ms
+  let lastTs = 0;
+  let flow = 0;
+  let maxFlow = 0;
+  let score = 0;
+  let perfectStreak = 0;
+  let alarmed = false;
+  let alarmFlash = 0;
+  let exitPulse = 0;
+  let moveAnim = 0;       // 0..1 progress from prev tile to current
+  let prevPlayerTile = 0;
+  let stepFloaters = [];  // visual tap feedback
+  let thiefShake = 0;
+
+  function startFloor(n) {
+    floor = n;
+    tiles = 6 + Math.min(10, Math.floor(n / 2));
+    playerTile = 0;
+    prevPlayerTile = 0;
+    moveAnim = 1;
+    pattern = buildPattern(n);
+    beatDur = 60000 / (BPM_BASE + Math.min(40, n * 2));
+    beatIndex = 0;
+    beatStart = performance.now();
+    timeLeft = 30000;
+    flow = 0;
+    maxFlow = 0;
+    score = 0;
+    perfectStreak = 0;
+    alarmed = false;
+    alarmFlash = 0;
+    exitPulse = 0;
+    stepFloaters = [];
+    thiefShake = 0;
+    state = State.PLAY;
+    showHUD(true);
+    hideAll(['menu','result','how','suitsScreen','lbScreen']);
+    lastTs = performance.now();
+  }
+
+  function endFloor(escaped) {
+    state = State.RESULT;
+    showHUD(false);
+    const remaining = Math.max(0, timeLeft);
+    if (escaped) {
+      score += Math.floor(remaining / 10);
+      score += maxFlow * 50;
+      const prevBest = save.best[floor] || 0;
+      if (remaining > prevBest) save.best[floor] = remaining;
+      save.totalFlow += maxFlow;
+      save.ghosts.push({
+        name: save.name || 'ANON',
+        floor, score, flow: maxFlow,
+        time: (30000 - remaining) / 1000,
+        ts: Date.now()
+      });
+      save.ghosts.sort((a,b) => b.score - a.score);
+      save.ghosts = save.ghosts.slice(0, 50);
+      refreshSuits();
+      persist();
+    }
+    document.getElementById('resultTitle').textContent = escaped ? 'ESCAPED' : 'CAUGHT';
+    document.getElementById('resultLine1').textContent = 'Floor ' + floor;
+    document.getElementById('resultLine2').textContent =
+      escaped
+        ? ('Score ' + score + ' · Flow ' + maxFlow + ' · ' + ((30000 - remaining)/1000).toFixed(2) + 's')
+        : 'Alarm triggered';
+    const newlyUnlocked = SUITS.find(s => s.unlock === maxFloorCleared() && save.suitsUnlocked.includes(s.id) && escaped && floor === s.unlock);
+    document.getElementById('resultLine3').textContent = newlyUnlocked ? ('UNLOCKED: ' + newlyUnlocked.name + ' SUIT') : '';
+    document.getElementById('nextBtn').textContent = escaped ? 'NEXT FLOOR' : 'RETRY';
+    document.getElementById('result').classList.remove('hidden');
+  }
+
+  // --- Input ---
+  function tap() {
+    initAudio();
+    if (state !== State.PLAY) return;
+    if (alarmed) return;
+
+    // judge against current beat
+    const now = performance.now();
+    const tIntoBeat = now - beatStart;
+    const phase = tIntoBeat / beatDur; // 0..1
+    const isLight = pattern[beatIndex] === 1;
+    const nextIsLight = pattern[(beatIndex + 1) % pattern.length] === 1;
+
+    // allow tapping near the boundary to count for the nearest beat
+    let judgedLight = isLight;
+    let perfect = false;
+    const edgeNear = Math.min(phase, 1 - phase);
+    if (phase > 0.85) judgedLight = nextIsLight; // late = next beat
+
+    // perfect if near beat center of a dark beat
+    if (!judgedLight && Math.abs(phase - 0.5) < 0.18) perfect = true;
+
+    if (judgedLight) {
+      alarmed = true;
+      alarmFlash = 1;
+      thiefShake = 1;
+      tone(120, 0.3, 0.2, 'sawtooth');
+      tone(90, 0.5, 0.15, 'sawtooth');
+      document.body.classList.add('flash');
+      setTimeout(() => document.body.classList.remove('flash'), 400);
+      setTimeout(() => endFloor(false), 450);
+      return;
+    }
+
+    // safe step
+    prevPlayerTile = playerTile;
+    playerTile = Math.min(tiles, playerTile + 1);
+    moveAnim = 0;
+    if (perfect) {
+      flow = Math.min(99, flow + 1);
+      perfectStreak++;
+      score += 10 + perfectStreak;
+      tone(660 + Math.min(perfectStreak * 20, 400), 0.12, 0.15, 'triangle');
+    } else {
+      flow = Math.max(0, flow - 1);
+      perfectStreak = 0;
+      score += 5;
+      tone(440, 0.08, 0.1, 'sine');
+    }
+    maxFlow = Math.max(maxFlow, flow);
+    stepFloaters.push({ t: 0, perfect });
+
+    if (playerTile >= tiles) {
+      tone(880, 0.15, 0.15, 'triangle');
+      setTimeout(() => tone(1320, 0.25, 0.15, 'triangle'), 120);
+      setTimeout(() => endFloor(true), 350);
+    }
+  }
+
+  canvas.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    tap();
+  });
+  window.addEventListener('keydown', e => {
+    if (e.code === 'Space' || e.code === 'Enter') { e.preventDefault(); tap(); }
+  });
+
+  // --- Update ---
+  function update(ts) {
+    const dt = Math.min(50, ts - lastTs);
+    lastTs = ts;
+
+    if (state === State.PLAY) {
+      timeLeft -= dt;
+      if (timeLeft <= 0) {
+        timeLeft = 0;
+        endFloor(false);
+      }
+
+      // beat advance
+      let tIntoBeat = ts - beatStart;
+      while (tIntoBeat >= beatDur) {
+        beatStart += beatDur;
+        tIntoBeat -= beatDur;
+        beatIndex = (beatIndex + 1) % pattern.length;
+        // sound cue: subtle for dark, sharper for light
+        if (pattern[beatIndex]) click(220, 0.12, 0.08);
+        else click(110, 0.08, 0.04);
+      }
+
+      moveAnim = Math.min(1, moveAnim + dt / 120);
+      alarmFlash = Math.max(0, alarmFlash - dt / 450);
+      thiefShake = Math.max(0, thiefShake - dt / 400);
+      exitPulse += dt;
+      stepFloaters = stepFloaters.filter(f => (f.t += dt) < 500);
+
+      // HUD
+      document.getElementById('floor').textContent = floor;
+      document.getElementById('timer').textContent = (timeLeft / 1000).toFixed(1);
+      document.getElementById('flow').textContent = flow;
+      renderBeats();
+    }
+
+    render();
+    requestAnimationFrame(update);
+  }
+
+  // --- Render ---
+  function currentSuit() {
+    return SUITS.find(s => s.id === save.activeSuit) || SUITS[0];
+  }
+
+  function render() {
+    if (state !== State.PLAY) {
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, W, H);
+      renderAmbient();
+      return;
+    }
+
+    const phase = (performance.now() - beatStart) / beatDur;
+    const isLight = pattern[beatIndex] === 1;
+    // light intensity eases in/out of each beat
+    let lightLevel = 0;
+    if (isLight) {
+      lightLevel = Math.sin(Math.min(1, phase) * Math.PI);
+    }
+
+    // Background
+    const bgBase = 8;
+    const bgLit = bgBase + lightLevel * 32;
+    ctx.fillStyle = `rgb(${bgLit|0},${bgLit|0},${(bgLit*1.05)|0})`;
+    ctx.fillRect(0, 0, W, H);
+
+    // Scanning light beams when light beat
+    if (lightLevel > 0.05) {
+      const beams = 3;
+      for (let i = 0; i < beams; i++) {
+        const bx = W * ((i + 0.5) / beams) + Math.sin(performance.now() / 600 + i) * 40;
+        const grad = ctx.createRadialGradient(bx, -40, 20, bx, H * 0.6, H);
+        grad.addColorStop(0, `rgba(255,240,200,${0.15 * lightLevel})`);
+        grad.addColorStop(1, 'rgba(255,240,200,0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, W, H);
+      }
+    }
+
+    // Alarm overlay
+    if (alarmFlash > 0) {
+      ctx.fillStyle = `rgba(217,72,72,${0.35 * alarmFlash})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // Floor / corridor
+    const midY = H * 0.62;
+    const tileW = Math.min(72, (W - 80) / (tiles + 1));
+    const startX = (W - tileW * (tiles + 1)) / 2;
+
+    // Corridor bands
+    ctx.strokeStyle = 'rgba(232,232,232,0.12)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, midY + 40);
+    ctx.lineTo(W, midY + 40);
+    ctx.moveTo(0, midY - 60);
+    ctx.lineTo(W, midY - 60);
+    ctx.stroke();
+
+    // Tiles
+    for (let i = 0; i <= tiles; i++) {
+      const x = startX + i * tileW + tileW / 2;
+      const isExit = i === tiles;
+      const reached = i <= playerTile;
+      ctx.save();
+      ctx.translate(x, midY);
+      const size = isExit ? 14 : 5;
+      if (isExit) {
+        const pulse = 0.5 + 0.5 * Math.sin(exitPulse / 200);
+        ctx.strokeStyle = `rgba(255,209,102,${0.5 + pulse * 0.5})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, 14 + pulse * 4, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = `rgba(255,209,102,${0.4 + pulse * 0.4})`;
+        ctx.beginPath();
+        ctx.arc(0, 0, 5, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.fillStyle = reached ? 'rgba(232,232,232,0.7)' : 'rgba(232,232,232,0.2)';
+        ctx.beginPath();
+        ctx.arc(0, 0, size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // Player
+    const drawTile = prevPlayerTile + (playerTile - prevPlayerTile) * easeOut(moveAnim);
+    const px = startX + drawTile * tileW + tileW / 2;
+    const shakeX = (Math.random() - 0.5) * 6 * thiefShake;
+    drawThief(px + shakeX, midY);
+
+    // Step floaters
+    stepFloaters.forEach(f => {
+      const a = 1 - f.t / 500;
+      const y = midY - 30 - (f.t / 500) * 30;
+      ctx.fillStyle = f.perfect ? `rgba(255,209,102,${a})` : `rgba(232,232,232,${a})`;
+      ctx.font = '600 10px -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(f.perfect ? 'PERFECT' : 'STEP', px + shakeX, y);
+    });
+
+    // Danger vignette during light
+    if (lightLevel > 0) {
+      const g = ctx.createRadialGradient(W/2, midY, Math.min(W,H)*0.2, W/2, midY, Math.max(W,H)*0.7);
+      g.addColorStop(0, 'rgba(0,0,0,0)');
+      g.addColorStop(1, `rgba(217,72,72,${0.25 * lightLevel})`);
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // Flow bar
+    if (flow > 0) {
+      const bw = Math.min(240, W * 0.4);
+      const bx = (W - bw) / 2;
+      const by = midY + 80;
+      ctx.fillStyle = 'rgba(232,232,232,0.1)';
+      ctx.fillRect(bx, by, bw, 3);
+      ctx.fillStyle = `hsl(${180 + flow * 4}, 70%, 60%)`;
+      ctx.fillRect(bx, by, bw * Math.min(1, flow / 20), 3);
+    }
+  }
+
+  function renderAmbient() {
+    const t = performance.now() / 3000;
+    for (let i = 0; i < 3; i++) {
+      const a = 0.05 + 0.05 * Math.sin(t + i);
+      ctx.fillStyle = `rgba(232,232,232,${a})`;
+      const y = (H * (0.2 + i * 0.3) + Math.sin(t + i) * 20);
+      ctx.fillRect(0, y, W, 1);
+    }
+  }
+
+  function drawThief(x, y) {
+    const s = currentSuit();
+    const color = s.color;
+    const stroke = s.stroke || null;
+    ctx.save();
+    ctx.translate(x, y);
+    // shadow under
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath();
+    ctx.ellipse(0, 8, 14, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // body (silhouette)
+    ctx.fillStyle = color;
+    if (stroke) {
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = 1.5;
+    }
+    // torso
+    ctx.beginPath();
+    ctx.moveTo(-7, 4);
+    ctx.quadraticCurveTo(-9, -8, -5, -14);
+    ctx.quadraticCurveTo(0, -18, 5, -14);
+    ctx.quadraticCurveTo(9, -8, 7, 4);
+    ctx.closePath();
+    ctx.fill();
+    if (stroke) ctx.stroke();
+    // head
+    ctx.beginPath();
+    ctx.arc(0, -20, 5, 0, Math.PI * 2);
+    ctx.fill();
+    if (stroke) ctx.stroke();
+    // legs
+    ctx.fillRect(-5, 4, 3, 10);
+    ctx.fillRect(2, 4, 3, 10);
+    if (stroke) { ctx.strokeRect(-5, 4, 3, 10); ctx.strokeRect(2, 4, 3, 10); }
+    ctx.restore();
+  }
+
+  function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
+
+  // --- UI ---
+  function showHUD(v) {
+    document.getElementById('hud').classList.toggle('hidden', !v);
+    document.getElementById('beats').classList.toggle('hidden', !v);
+  }
+
+  function renderBeats() {
+    const el = document.getElementById('beats');
+    // show upcoming 8 beats
+    const frag = [];
+    for (let i = 0; i < 8; i++) {
+      const idx = (beatIndex + i) % pattern.length;
+      const lit = pattern[idx] === 1;
+      const active = i === 0;
+      frag.push(`<div class="pip ${lit ? 'active' : 'dark'} ${active ? 'current' : ''}" style="${active ? (lit ? 'background:#ffd166;border-color:#ffd166;' : 'border-color:#e8e8e8;') : ''}"></div>`);
+    }
+    el.innerHTML = frag.join('');
+  }
+
+  function hideAll(ids) {
+    ids.forEach(id => document.getElementById(id).classList.add('hidden'));
+  }
+
+  // Menu buttons
+  document.getElementById('playBtn').addEventListener('click', () => {
+    save.name = document.getElementById('nameInput').value.trim().toUpperCase() || save.name || 'ANON';
+    persist();
+    initAudio();
+    startFloor(1);
+  });
+  document.getElementById('howBtn').addEventListener('click', () => {
+    hideAll(['menu']); document.getElementById('how').classList.remove('hidden');
+  });
+  document.getElementById('howBack').addEventListener('click', () => {
+    hideAll(['how']); document.getElementById('menu').classList.remove('hidden');
+  });
+  document.getElementById('suitsBtn').addEventListener('click', () => {
+    refreshSuits();
+    renderSuits();
+    hideAll(['menu']); document.getElementById('suitsScreen').classList.remove('hidden');
+  });
+  document.getElementById('suitsBack').addEventListener('click', () => {
+    hideAll(['suitsScreen']); document.getElementById('menu').classList.remove('hidden');
+  });
+  document.getElementById('lbBtn').addEventListener('click', () => {
+    renderLeaderboard();
+    hideAll(['menu']); document.getElementById('lbScreen').classList.remove('hidden');
+  });
+  document.getElementById('lbBack').addEventListener('click', () => {
+    hideAll(['lbScreen']); document.getElementById('menu').classList.remove('hidden');
+  });
+  document.getElementById('clearLb').addEventListener('click', () => {
+    if (confirm('Clear all ghost runs?')) {
+      save.ghosts = [];
+      persist();
+      renderLeaderboard();
+    }
+  });
+  document.getElementById('nextBtn').addEventListener('click', () => {
+    const title = document.getElementById('resultTitle').textContent;
+    if (title === 'ESCAPED') startFloor(floor + 1);
+    else startFloor(floor);
+  });
+  document.getElementById('menuBtn').addEventListener('click', () => {
+    hideAll(['result']);
+    document.getElementById('menu').classList.remove('hidden');
+    state = State.MENU;
+    document.getElementById('nameInput').value = save.name || '';
+  });
+
+  function renderSuits() {
+    const grid = document.getElementById('suitsGrid');
+    const cleared = maxFloorCleared();
+    grid.innerHTML = '';
+    SUITS.forEach(s => {
+      const owned = save.suitsUnlocked.includes(s.id);
+      const div = document.createElement('div');
+      div.className = 'suit ' + (owned ? 'owned' : 'locked') + (save.activeSuit === s.id ? ' active' : '');
+      const stroke = s.stroke ? `border:1px solid ${s.stroke};` : '';
+      div.innerHTML = `<div class="suit-dot" style="background:${s.color};${stroke}"></div>`;
+      div.title = owned ? s.name : `Clear floor ${s.unlock}`;
+      div.addEventListener('click', () => {
+        if (!owned) return;
+        save.activeSuit = s.id;
+        persist();
+        renderSuits();
+      });
+      grid.appendChild(div);
+    });
+    document.getElementById('suitsHint').textContent =
+      'Cleared floor ' + cleared + '. Unlocks at 3, 6, 10, 15, 20, 25, 30.';
+  }
+
+  function renderLeaderboard() {
+    const lb = document.getElementById('leaderboard');
+    if (!save.ghosts.length) {
+      lb.innerHTML = '<p class="tiny" style="text-align:center;padding:20px;">No runs yet.</p>';
+      return;
+    }
+    const myName = (save.name || 'ANON');
+    lb.innerHTML = save.ghosts.slice(0, 20).map((g, i) => {
+      return `<div class="lb-row ${g.name === myName ? 'you' : ''}">
+        <span>${(i+1).toString().padStart(2,'0')} ${escapeHtml(g.name)}</span>
+        <span>F${g.floor} · ${g.score} · ${g.time.toFixed(1)}s</span>
+      </div>`;
+    }).join('');
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // Init name input
+  document.getElementById('nameInput').value = save.name || '';
+  refreshSuits();
+
+  // Start loop
+  requestAnimationFrame(update);
+
+  // Prevent double-tap zoom / context menu
+  document.addEventListener('contextmenu', e => e.preventDefault());
+  document.addEventListener('gesturestart', e => e.preventDefault());
+})();
+</script>
+</body>
+</html>

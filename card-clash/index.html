@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Card-Clash</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>CARD-CLASH</h1>
+    <div id="meta">
+      <span id="coins">Coins: 0</span>
+      <span id="wins">Wins: 0</span>
+      <span id="packs">Packs: 0</span>
+    </div>
+  </header>
+
+  <main id="screen-menu" class="screen active">
+    <div class="menu-card">
+      <h2>Minimalist Auto-Battler</h2>
+      <p>Draft 3 cards. Watch them fight. Find synergies.</p>
+      <button class="btn-primary" data-go="draft">PLAY</button>
+      <button class="btn-secondary" data-go="collection">COLLECTION</button>
+      <button class="btn-secondary" data-go="shop">SHOP</button>
+      <button class="btn-secondary" data-go="tournament">TOURNAMENT</button>
+      <button class="btn-ghost" data-go="how">HOW TO PLAY</button>
+    </div>
+  </main>
+
+  <main id="screen-how" class="screen">
+    <div class="menu-card">
+      <h2>How to Play</h2>
+      <ul class="rules">
+        <li><b>Draft:</b> Pick 3 cards from a pool of 6.</li>
+        <li><b>Arrange:</b> Drag cards to your board slots. Order matters for some synergies.</li>
+        <li><b>Battle:</b> Auto-resolves in ~10s vs opponent.</li>
+        <li><b>Synergies:</b> Matching tags (Fire, Beast, Order, etc.) trigger combos. Stack tags for exponential power.</li>
+        <li><b>Unlock:</b> Win coins, buy packs, collect rarer cards.</li>
+      </ul>
+      <button class="btn-primary" data-go="menu">BACK</button>
+    </div>
+  </main>
+
+  <main id="screen-draft" class="screen">
+    <h2>DRAFT — Pick 3 Cards</h2>
+    <div id="draft-pool" class="card-row"></div>
+    <h3>Your Board <small id="pick-count">(0/3)</small></h3>
+    <div id="draft-board" class="board-row"></div>
+    <div class="actions">
+      <button id="btn-reroll" class="btn-secondary">REROLL (5c)</button>
+      <button id="btn-battle" class="btn-primary" disabled>BATTLE</button>
+      <button class="btn-ghost" data-go="menu">QUIT</button>
+    </div>
+    <div id="synergy-preview" class="synergy-preview"></div>
+  </main>
+
+  <main id="screen-battle" class="screen">
+    <div class="battle-area">
+      <div class="side side-enemy">
+        <div class="side-header">
+          <span class="label">OPPONENT</span>
+          <div class="hp-bar"><div id="enemy-hp" class="hp-fill enemy"></div></div>
+          <span id="enemy-hp-text" class="hp-text">30/30</span>
+        </div>
+        <div id="enemy-board" class="board-row"></div>
+      </div>
+
+      <div id="battle-log" class="battle-log"></div>
+
+      <div class="side side-player">
+        <div id="player-board" class="board-row"></div>
+        <div class="side-header">
+          <span class="label">YOU</span>
+          <div class="hp-bar"><div id="player-hp" class="hp-fill player"></div></div>
+          <span id="player-hp-text" class="hp-text">30/30</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button id="btn-skip" class="btn-secondary">SKIP ANIMATION</button>
+    </div>
+  </main>
+
+  <main id="screen-result" class="screen">
+    <div class="menu-card">
+      <h2 id="result-title">VICTORY</h2>
+      <p id="result-text">+10 coins</p>
+      <button id="btn-again" class="btn-primary">PLAY AGAIN</button>
+      <button class="btn-secondary" data-go="menu">MENU</button>
+    </div>
+  </main>
+
+  <main id="screen-collection" class="screen">
+    <h2>COLLECTION</h2>
+    <div id="collection-grid" class="card-grid"></div>
+    <button class="btn-primary" data-go="menu">BACK</button>
+  </main>
+
+  <main id="screen-shop" class="screen">
+    <div class="menu-card">
+      <h2>SHOP</h2>
+      <p>Open packs to expand your card pool.</p>
+      <div class="shop-row">
+        <button id="buy-basic" class="pack-btn">
+          <span class="pack-name">Basic Pack</span>
+          <span class="pack-cost">20c</span>
+          <span class="pack-desc">3 cards (Common+)</span>
+        </button>
+        <button id="buy-rare" class="pack-btn pack-rare">
+          <span class="pack-name">Rare Pack</span>
+          <span class="pack-cost">60c</span>
+          <span class="pack-desc">3 cards, 1 guaranteed Rare+</span>
+        </button>
+        <button id="buy-legend" class="pack-btn pack-legend">
+          <span class="pack-name">Legend Pack</span>
+          <span class="pack-cost">150c</span>
+          <span class="pack-desc">3 cards, 1 guaranteed Legendary</span>
+        </button>
+      </div>
+      <div id="pack-result" class="pack-result"></div>
+      <button class="btn-secondary" data-go="menu">BACK</button>
+    </div>
+  </main>
+
+  <main id="screen-tournament" class="screen">
+    <div class="menu-card">
+      <h2>SEASONAL TOURNAMENT</h2>
+      <p id="tournament-desc"></p>
+      <div id="tournament-progress" class="tournament-progress"></div>
+      <button id="btn-tournament-start" class="btn-primary">ENTER ROUND</button>
+      <button class="btn-secondary" data-go="menu">BACK</button>
+    </div>
+  </main>
+</div>
+
+<script src="cards.js"></script>
+<script src="game.js"></script>
+</body>
+</html>

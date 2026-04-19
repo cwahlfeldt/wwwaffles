@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pulse-Tap</title>
+<style>
+  :root {
+    --bg: #07080d;
+    --fg: #e8ecff;
+    --accent: #6cf0ff;
+    --warn: #ff5d6c;
+    --good: #7cffa0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%; height: 100%;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+  }
+  #game {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    cursor: crosshair;
+  }
+  .overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    background: radial-gradient(ellipse at center, rgba(10,12,20,0.7), rgba(0,0,0,0.92));
+    backdrop-filter: blur(6px);
+    z-index: 10;
+    padding: 24px;
+  }
+  .overlay.hidden { display: none; }
+  h1 {
+    font-size: clamp(36px, 7vw, 72px);
+    letter-spacing: 0.18em;
+    color: var(--accent);
+    text-shadow: 0 0 20px rgba(108,240,255,0.55), 0 0 40px rgba(108,240,255,0.25);
+    margin-bottom: 8px;
+  }
+  h2 {
+    font-size: clamp(20px, 3vw, 28px);
+    color: var(--fg);
+    margin-bottom: 18px;
+    opacity: 0.85;
+  }
+  p { opacity: 0.78; margin: 6px 0; max-width: 540px; line-height: 1.5; font-size: 14px; }
+  .btn {
+    margin-top: 22px;
+    padding: 14px 28px;
+    border: 1px solid var(--accent);
+    background: rgba(108,240,255,0.08);
+    color: var(--accent);
+    font: inherit;
+    font-size: 16px;
+    letter-spacing: 0.18em;
+    cursor: pointer;
+    text-transform: uppercase;
+    transition: background 0.15s, transform 0.1s;
+  }
+  .btn:hover { background: rgba(108,240,255,0.2); }
+  .btn:active { transform: scale(0.97); }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+  .pill {
+    display: inline-block;
+    padding: 4px 10px;
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 999px;
+    font-size: 12px;
+    margin: 2px;
+    opacity: 0.85;
+  }
+  .pill.on { color: var(--good); border-color: var(--good); }
+  .pill.off { color: rgba(255,255,255,0.4); }
+  .stats {
+    margin-top: 18px;
+    display: grid;
+    grid-template-columns: auto auto;
+    gap: 6px 18px;
+    font-size: 14px;
+    opacity: 0.92;
+  }
+  .stats span:nth-child(odd) { opacity: 0.6; text-align: right; }
+  .hud {
+    position: fixed;
+    top: 16px; left: 16px; right: 16px;
+    display: flex; justify-content: space-between;
+    pointer-events: none;
+    font-size: 14px;
+    letter-spacing: 0.12em;
+    z-index: 5;
+  }
+  .hud > div { background: rgba(10,12,20,0.55); padding: 8px 12px; border: 1px solid rgba(255,255,255,0.08); }
+  .hud .lives { color: var(--warn); }
+  .hud .timer { color: var(--accent); }
+  .footer-hint { position: fixed; bottom: 12px; left: 0; right: 0; text-align: center; opacity: 0.4; font-size: 12px; pointer-events: none; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div class="hud" id="hud">
+  <div>SCORE <span id="score">0</span> &nbsp; X<span id="combo">1</span></div>
+  <div class="timer">WAVE <span id="wave">1</span> &nbsp; <span id="timer">20.0</span>s</div>
+  <div class="lives">HP <span id="lives">3</span></div>
+</div>
+<div class="footer-hint">tap / click / space to deflect</div>
+
+<div class="overlay" id="menu">
+  <h1>PULSE-TAP</h1>
+  <h2>Timing-Based Combat Reflexes</h2>
+  <p>Projectiles fly toward you. Each carries a shrinking ring. Tap when ring kisses the deflect band to deflect it. Miss the timing &mdash; or let it through &mdash; lose HP.</p>
+  <p>20-second waves. Higher waves spawn faster, hit harder. Combo multiplies score. Best timing = "PERFECT" = burst.</p>
+  <div class="stats">
+    <span>Best Score</span><span id="best">0</span>
+    <span>Best Wave</span><span id="bestWave">1</span>
+  </div>
+  <div style="margin-top: 18px;">
+    <div style="opacity:0.6; font-size:12px; letter-spacing:0.18em; margin-bottom:6px;">UNLOCKS</div>
+    <div class="row" id="unlocks"></div>
+  </div>
+  <button class="btn" id="startBtn">BEGIN</button>
+</div>
+
+<div class="overlay hidden" id="gameover">
+  <h1 id="goTitle">WAVE CLEAR</h1>
+  <div class="stats">
+    <span>Score</span><span id="goScore">0</span>
+    <span>Wave Reached</span><span id="goWave">1</span>
+    <span>Best Combo</span><span id="goCombo">0</span>
+    <span>Perfects</span><span id="goPerfect">0</span>
+  </div>
+  <div style="margin-top:14px;" id="goUnlock"></div>
+  <div class="row" style="margin-top: 8px;">
+    <button class="btn" id="nextBtn">NEXT WAVE</button>
+    <button class="btn" id="menuBtn">MENU</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+
+  // --- HUD refs ---
+  const $score = document.getElementById('score');
+  const $combo = document.getElementById('combo');
+  const $wave = document.getElementById('wave');
+  const $timer = document.getElementById('timer');
+  const $lives = document.getElementById('lives');
+  const $menu = document.getElementById('menu');
+  const $gameover = document.getElementById('gameover');
+  const $best = document.getElementById('best');
+  const $bestWave = document.getElementById('bestWave');
+  const $unlocksWrap = document.getElementById('unlocks');
+  const $goTitle = document.getElementById('goTitle');
+  const $goScore = document.getElementById('goScore');
+  const $goWave = document.getElementById('goWave');
+  const $goCombo = document.getElementById('goCombo');
+  const $goPerfect = document.getElementById('goPerfect');
+  const $goUnlock = document.getElementById('goUnlock');
+  const $startBtn = document.getElementById('startBtn');
+  const $nextBtn = document.getElementById('nextBtn');
+  const $menuBtn = document.getElementById('menuBtn');
+
+  // --- Canvas sizing ---
+  let W = 0, H = 0, CX = 0, CY = 0, DPR = 1;
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W * DPR;
+    canvas.height = H * DPR;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    CX = W / 2;
+    CY = H / 2;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // --- Audio (WebAudio, lazy) ---
+  let audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+      catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function blip(freq, dur, type, gain) {
+    if (!audioCtx) return;
+    const t = audioCtx.currentTime;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = type || 'sine';
+    o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(gain || 0.18, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(t);
+    o.stop(t + dur + 0.05);
+  }
+  function sfx(name) {
+    if (!audioCtx) return;
+    if (name === 'perfect') { blip(880, 0.18, 'triangle', 0.22); blip(1320, 0.16, 'sine', 0.14); }
+    else if (name === 'good') { blip(660, 0.12, 'triangle', 0.16); }
+    else if (name === 'miss') { blip(140, 0.22, 'sawtooth', 0.18); }
+    else if (name === 'hit') { blip(90, 0.32, 'square', 0.22); }
+    else if (name === 'wave') { blip(523, 0.12, 'sine', 0.14); blip(659, 0.12, 'sine', 0.14); blip(784, 0.18, 'sine', 0.16); }
+    else if (name === 'over') { blip(220, 0.4, 'sawtooth', 0.18); blip(110, 0.5, 'sawtooth', 0.16); }
+  }
+
+  // --- Persistence ---
+  const SAVE_KEY = 'pulsetap.save.v1';
+  const defaultSave = { best: 0, bestWave: 1, unlocked: ['default'], totalPerfects: 0 };
+  let save = loadSave();
+  function loadSave() {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (raw) return Object.assign({}, defaultSave, JSON.parse(raw));
+    } catch (e) {}
+    return Object.assign({}, defaultSave);
+  }
+  function persist() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {} }
+
+  // --- Unlockables (Burst skins) ---
+  const SKINS = [
+    { id: 'default', name: 'Default', cost: 0, color: '#6cf0ff', burst: 'rings' },
+    { id: 'ember', name: 'Ember', cost: 1500, color: '#ffb066', burst: 'sparks' },
+    { id: 'mint', name: 'Mint', cost: 4000, color: '#7cffa0', burst: 'shards' },
+    { id: 'violet', name: 'Violet', cost: 8000, color: '#c89bff', burst: 'starburst' },
+    { id: 'crimson', name: 'Crimson', cost: 15000, color: '#ff5d6c', burst: 'shock' },
+  ];
+  let activeSkin = SKINS[0];
+  function pickActiveSkin() {
+    const stored = save.activeSkin;
+    activeSkin = SKINS.find(s => s.id === stored && save.unlocked.includes(s.id)) || SKINS[0];
+  }
+  function renderUnlocks() {
+    $unlocksWrap.innerHTML = '';
+    SKINS.forEach(s => {
+      const el = document.createElement('span');
+      const owned = save.unlocked.includes(s.id);
+      el.className = 'pill ' + (owned ? 'on' : 'off');
+      el.textContent = owned ? `${s.name}` : `${s.name} · ${s.cost}`;
+      if (owned) {
+        el.style.cursor = 'pointer';
+        if (activeSkin.id === s.id) el.textContent = `▸ ${s.name}`;
+        el.addEventListener('click', () => {
+          activeSkin = s;
+          save.activeSkin = s.id;
+          persist();
+          renderUnlocks();
+        });
+      }
+      $unlocksWrap.appendChild(el);
+    });
+  }
+  function checkUnlocks(score) {
+    const newly = [];
+    SKINS.forEach(s => {
+      if (!save.unlocked.includes(s.id) && score >= s.cost) {
+        save.unlocked.push(s.id);
+        newly.push(s);
+      }
+    });
+    if (newly.length) persist();
+    return newly;
+  }
+
+  // --- Game state ---
+  const STATE = { MENU: 'menu', PLAY: 'play', OVER: 'over' };
+  let state = STATE.MENU;
+  let projectiles = [];
+  let particles = [];
+  let bursts = [];
+  let floats = [];
+  let shake = 0;
+  let flash = 0;
+  let flashColor = '#fff';
+  let score = 0;
+  let combo = 1;
+  let bestCombo = 0;
+  let perfectCount = 0;
+  let lives = 3;
+  let wave = 1;
+  let waveTimeLeft = 20;
+  let spawnTimer = 0;
+  let lastTick = 0;
+  let waveStartScore = 0;
+
+  const PLAYER_R = 28;
+  const DEFLECT_TARGET = PLAYER_R + 14; // ring should hit this radius
+  const BAND = 12; // half-width of acceptable band (good)
+  const PERFECT_BAND = 4;
+
+  function resetWave(nextWave) {
+    wave = nextWave;
+    waveTimeLeft = 20;
+    spawnTimer = 0;
+    projectiles = [];
+    particles = [];
+    bursts = [];
+    floats = [];
+    waveStartScore = score;
+  }
+  function startGame() {
+    score = 0;
+    combo = 1;
+    bestCombo = 0;
+    perfectCount = 0;
+    lives = 3;
+    resetWave(1);
+    state = STATE.PLAY;
+    $menu.classList.add('hidden');
+    $gameover.classList.add('hidden');
+    lastTick = performance.now();
+    requestAnimationFrame(loop);
+  }
+  function nextWaveContinue() {
+    if (lives <= 0) { startGame(); return; }
+    resetWave(wave + 1);
+    state = STATE.PLAY;
+    $gameover.classList.add('hidden');
+    lastTick = performance.now();
+    requestAnimationFrame(loop);
+    sfx('wave');
+  }
+  function endWave(reason) {
+    state = STATE.OVER;
+    if (score > save.best) save.best = score;
+    if (wave > save.bestWave) save.bestWave = wave;
+    save.totalPerfects += perfectCount;
+    const newly = checkUnlocks(save.best);
+    persist();
+    $goTitle.textContent = reason === 'dead' ? 'WAVE FAILED' : 'WAVE CLEAR';
+    $goTitle.style.color = reason === 'dead' ? 'var(--warn)' : 'var(--good)';
+    $goScore.textContent = score;
+    $goWave.textContent = wave;
+    $goCombo.textContent = bestCombo;
+    $goPerfect.textContent = perfectCount;
+    $goUnlock.innerHTML = newly.length
+      ? `<div style="color:var(--good); font-size:13px; letter-spacing:0.16em;">UNLOCKED: ${newly.map(n => n.name.toUpperCase()).join(' · ')}</div>`
+      : '';
+    $nextBtn.textContent = reason === 'dead' ? 'RETRY' : 'NEXT WAVE';
+    $gameover.classList.remove('hidden');
+    sfx(reason === 'dead' ? 'over' : 'wave');
+  }
+
+  // --- Spawning ---
+  function spawnProjectile() {
+    const speedBase = 0.10 + wave * 0.012; // px/ms toward center (will be scaled by distance)
+    // Spawn from edge
+    const angle = Math.random() * Math.PI * 2;
+    const distFromCenter = Math.max(W, H) * 0.55;
+    const x = CX + Math.cos(angle) * distFromCenter;
+    const y = CY + Math.sin(angle) * distFromCenter;
+    const totalDist = Math.hypot(x - CX, y - CY);
+    // Travel duration (ms): want 1.6s..2.6s, faster waves = shorter
+    const baseDur = 2600 - Math.min(1200, wave * 90);
+    const dur = baseDur + (Math.random() - 0.5) * 400;
+    projectiles.push({
+      x, y,
+      ox: x, oy: y,
+      tx: CX, ty: CY,
+      angle,
+      startTime: performance.now(),
+      dur,
+      totalDist,
+      ringStart: totalDist + 30, // start ring large
+      hue: 200 + Math.random() * 60,
+      dead: false,
+      hit: false,
+    });
+  }
+
+  function spawnRate() {
+    // ms between spawns, decreases with wave
+    return Math.max(280, 900 - wave * 55);
+  }
+
+  // --- Particles ---
+  function addParticles(x, y, color, count, opts) {
+    opts = opts || {};
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = (opts.minSpeed || 80) + Math.random() * (opts.maxSpeed || 220);
+      particles.push({
+        x, y,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp,
+        life: 0.5 + Math.random() * 0.6,
+        age: 0,
+        color,
+        size: 1 + Math.random() * 2.5,
+      });
+    }
+  }
+  function addBurst(x, y, color, type) {
+    bursts.push({ x, y, age: 0, life: 0.55, color, type: type || 'rings' });
+  }
+  function addFloat(x, y, text, color) {
+    floats.push({ x, y, text, color, age: 0, life: 0.9 });
+  }
+
+  // --- Tap handling ---
+  function onTap(ev) {
+    ensureAudio();
+    if (state === STATE.MENU) return;
+    if (state === STATE.OVER) return;
+    if (ev) ev.preventDefault();
+    // Find best candidate: closest projectile whose ring is inside the deflect window
+    let best = null;
+    let bestErr = Infinity;
+    const now = performance.now();
+    for (const p of projectiles) {
+      if (p.dead || p.hit) continue;
+      const t = (now - p.startTime) / p.dur;
+      if (t < 0 || t > 1.05) continue;
+      // Ring radius shrinks from p.ringStart -> 0 over t
+      const ringR = p.ringStart * (1 - t);
+      const err = Math.abs(ringR - DEFLECT_TARGET);
+      if (err < BAND && err < bestErr) { bestErr = err; best = p; }
+    }
+    if (!best) {
+      // Misfire: combo break, small penalty visual
+      combo = 1;
+      shake = Math.max(shake, 6);
+      flash = 0.12; flashColor = '#ff5d6c';
+      addFloat(CX, CY - PLAYER_R - 20, 'MISS', '#ff5d6c');
+      sfx('miss');
+      updateHUD();
+      return;
+    }
+    const perfect = bestErr < PERFECT_BAND;
+    deflect(best, perfect);
+  }
+
+  function deflect(p, perfect) {
+    p.hit = true;
+    p.dead = true;
+    const base = perfect ? 150 : 75;
+    const gained = base * combo;
+    score += gained;
+    combo += 1;
+    if (combo - 1 > bestCombo) bestCombo = combo - 1;
+    if (perfect) perfectCount += 1;
+
+    const col = perfect ? activeSkin.color : '#cfe9ff';
+    addBurst(p.x, p.y, col, perfect ? activeSkin.burst : 'rings');
+    addParticles(p.x, p.y, col, perfect ? 26 : 14, { maxSpeed: perfect ? 320 : 220 });
+    addFloat(p.x, p.y - 16, perfect ? `PERFECT +${gained}` : `+${gained}`, col);
+
+    shake = Math.max(shake, perfect ? 10 : 5);
+    flash = Math.max(flash, perfect ? 0.22 : 0.10);
+    flashColor = col;
+    sfx(perfect ? 'perfect' : 'good');
+    updateHUD();
+  }
+
+  function takeHit(p) {
+    lives -= 1;
+    combo = 1;
+    shake = Math.max(shake, 18);
+    flash = 0.32; flashColor = '#ff5d6c';
+    addParticles(CX, CY, '#ff5d6c', 30, { maxSpeed: 320 });
+    addFloat(CX, CY + PLAYER_R + 18, '-1 HP', '#ff5d6c');
+    sfx('hit');
+    p.dead = true;
+    updateHUD();
+    if (lives <= 0) endWave('dead');
+  }
+
+  // --- Update ---
+  function update(dt) {
+    waveTimeLeft -= dt;
+    if (waveTimeLeft <= 0 && state === STATE.PLAY) {
+      // wave clear
+      score += 200 + wave * 50; // wave bonus
+      addFloat(CX, CY - 50, `WAVE BONUS +${200 + wave * 50}`, '#7cffa0');
+      endWave('clear');
+      return;
+    }
+
+    spawnTimer -= dt * 1000;
+    if (spawnTimer <= 0) {
+      spawnProjectile();
+      spawnTimer = spawnRate();
+      // chance for a double-tap burst at higher waves
+      if (wave >= 3 && Math.random() < 0.18) {
+        setTimeout(() => { if (state === STATE.PLAY) spawnProjectile(); }, 220);
+      }
+    }
+
+    const now = performance.now();
+    for (const p of projectiles) {
+      if (p.dead) continue;
+      const t = (now - p.startTime) / p.dur;
+      if (t >= 1) {
+        // reached center
+        if (!p.hit) takeHit(p);
+        continue;
+      }
+      // ease in slightly so ring reads better
+      const e = t * t;
+      p.x = p.ox + (p.tx - p.ox) * e;
+      p.y = p.oy + (p.ty - p.oy) * e;
+    }
+    projectiles = projectiles.filter(p => !p.dead);
+
+    for (const pt of particles) {
+      pt.age += dt;
+      pt.x += pt.vx * dt;
+      pt.y += pt.vy * dt;
+      pt.vx *= 0.96;
+      pt.vy *= 0.96;
+    }
+    particles = particles.filter(pt => pt.age < pt.life);
+
+    for (const b of bursts) b.age += dt;
+    bursts = bursts.filter(b => b.age < b.life);
+
+    for (const f of floats) {
+      f.age += dt;
+      f.y -= 30 * dt;
+    }
+    floats = floats.filter(f => f.age < f.life);
+
+    if (shake > 0) shake = Math.max(0, shake - dt * 50);
+    if (flash > 0) flash = Math.max(0, flash - dt * 1.4);
+  }
+
+  function updateHUD() {
+    $score.textContent = score;
+    $combo.textContent = combo;
+    $wave.textContent = wave;
+    $lives.textContent = Math.max(0, lives);
+  }
+
+  // --- Render ---
+  function drawBackground() {
+    // gradient + grid pulse
+    const t = performance.now() / 1000;
+    const g = ctx.createRadialGradient(CX, CY, 30, CX, CY, Math.max(W, H) * 0.7);
+    g.addColorStop(0, 'rgba(20,30,55,0.9)');
+    g.addColorStop(1, 'rgba(5,6,12,1)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    // faint guide ring at deflect target
+    ctx.save();
+    ctx.translate(CX, CY);
+    ctx.strokeStyle = 'rgba(108,240,255,0.10)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(0, 0, DEFLECT_TARGET, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawPlayer() {
+    const pulse = 1 + Math.sin(performance.now() / 220) * 0.04;
+    ctx.save();
+    ctx.translate(CX, CY);
+
+    // outer glow
+    const grad = ctx.createRadialGradient(0, 0, PLAYER_R * 0.2, 0, 0, PLAYER_R * 2.4);
+    grad.addColorStop(0, hexA(activeSkin.color, 0.55));
+    grad.addColorStop(1, hexA(activeSkin.color, 0));
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(0, 0, PLAYER_R * 2.4, 0, Math.PI * 2); ctx.fill();
+
+    // core
+    ctx.fillStyle = activeSkin.color;
+    ctx.beginPath(); ctx.arc(0, 0, PLAYER_R * 0.55 * pulse, 0, Math.PI * 2); ctx.fill();
+
+    // armor ring
+    ctx.strokeStyle = hexA(activeSkin.color, 0.85);
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0, 0, PLAYER_R, 0, Math.PI * 2); ctx.stroke();
+
+    // deflect band marker
+    ctx.strokeStyle = hexA(activeSkin.color, 0.30);
+    ctx.lineWidth = BAND * 2;
+    ctx.beginPath(); ctx.arc(0, 0, DEFLECT_TARGET, 0, Math.PI * 2); ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawProjectile(p) {
+    const now = performance.now();
+    const t = Math.min(1, (now - p.startTime) / p.dur);
+    const ringR = p.ringStart * (1 - t);
+    const inBand = Math.abs(ringR - DEFLECT_TARGET) < BAND;
+    const perfect = Math.abs(ringR - DEFLECT_TARGET) < PERFECT_BAND;
+
+    ctx.save();
+    ctx.translate(p.x, p.y);
+
+    // trail
+    const trailLen = 60;
+    const tx = -Math.cos(p.angle) * trailLen;
+    const ty = -Math.sin(p.angle) * trailLen;
+    const tg = ctx.createLinearGradient(0, 0, tx, ty);
+    tg.addColorStop(0, `hsla(${p.hue}, 90%, 70%, 0.9)`);
+    tg.addColorStop(1, `hsla(${p.hue}, 90%, 70%, 0)`);
+    ctx.strokeStyle = tg;
+    ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(tx, ty); ctx.stroke();
+
+    // body
+    ctx.fillStyle = `hsl(${p.hue}, 90%, 65%)`;
+    ctx.shadowColor = `hsl(${p.hue}, 90%, 65%)`;
+    ctx.shadowBlur = 18;
+    ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // shrinking ring
+    const ringColor = perfect ? activeSkin.color : (inBand ? '#fff' : `hsla(${p.hue}, 90%, 70%, 0.85)`);
+    ctx.strokeStyle = ringColor;
+    ctx.lineWidth = perfect ? 4 : (inBand ? 3 : 2);
+    if (perfect) { ctx.shadowColor = activeSkin.color; ctx.shadowBlur = 16; }
+    ctx.beginPath(); ctx.arc(0, 0, Math.max(4, ringR), 0, Math.PI * 2); ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    ctx.restore();
+  }
+
+  function drawParticles() {
+    for (const pt of particles) {
+      const a = 1 - pt.age / pt.life;
+      ctx.fillStyle = hexA(pt.color, a);
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, pt.size, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  function drawBursts() {
+    for (const b of bursts) {
+      const t = b.age / b.life;
+      const a = 1 - t;
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.strokeStyle = hexA(b.color, a);
+      ctx.lineWidth = 2;
+      if (b.type === 'rings') {
+        for (let i = 0; i < 3; i++) {
+          const r = (10 + i * 18) + t * 60;
+          ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
+        }
+      } else if (b.type === 'sparks') {
+        ctx.lineWidth = 3;
+        for (let i = 0; i < 10; i++) {
+          const ang = (i / 10) * Math.PI * 2;
+          const r1 = 6, r2 = 30 + t * 80;
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(ang) * r1, Math.sin(ang) * r1);
+          ctx.lineTo(Math.cos(ang) * r2, Math.sin(ang) * r2);
+          ctx.stroke();
+        }
+      } else if (b.type === 'shards') {
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 6; i++) {
+          const ang = (i / 6) * Math.PI * 2 + t * 1.4;
+          const r1 = 8 + t * 30, r2 = 18 + t * 70;
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(ang) * r1, Math.sin(ang) * r1);
+          ctx.lineTo(Math.cos(ang + 0.4) * r2, Math.sin(ang + 0.4) * r2);
+          ctx.stroke();
+        }
+      } else if (b.type === 'starburst') {
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 12; i++) {
+          const ang = (i / 12) * Math.PI * 2;
+          const r2 = 20 + t * 110;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(Math.cos(ang) * r2, Math.sin(ang) * r2);
+          ctx.stroke();
+        }
+      } else if (b.type === 'shock') {
+        ctx.lineWidth = 4 * (1 - t);
+        const r = 20 + t * 140;
+        ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
+        ctx.lineWidth = 2;
+        const r2 = 8 + t * 90;
+        ctx.beginPath(); ctx.arc(0, 0, r2, 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
+  function drawFloats() {
+    ctx.save();
+    ctx.font = 'bold 14px ui-monospace, Menlo, monospace';
+    ctx.textAlign = 'center';
+    for (const f of floats) {
+      const a = 1 - f.age / f.life;
+      ctx.fillStyle = hexA(f.color, a);
+      ctx.fillText(f.text, f.x, f.y);
+    }
+    ctx.restore();
+  }
+
+  function drawFlash() {
+    if (flash <= 0) return;
+    ctx.fillStyle = hexA(flashColor, flash * 0.45);
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  function render() {
+    let sx = 0, sy = 0;
+    if (shake > 0) {
+      sx = (Math.random() - 0.5) * shake;
+      sy = (Math.random() - 0.5) * shake;
+    }
+    ctx.save();
+    ctx.translate(sx, sy);
+
+    drawBackground();
+    drawPlayer();
+    for (const p of projectiles) drawProjectile(p);
+    drawBursts();
+    drawParticles();
+    drawFloats();
+
+    ctx.restore();
+    drawFlash();
+
+    // wave timer ring around screen edge
+    drawTimerRing();
+  }
+
+  function drawTimerRing() {
+    if (state !== STATE.PLAY) return;
+    const r = Math.min(W, H) * 0.46;
+    const frac = Math.max(0, waveTimeLeft / 20);
+    ctx.save();
+    ctx.translate(CX, CY);
+    ctx.rotate(-Math.PI / 2);
+    ctx.strokeStyle = 'rgba(108,240,255,0.08)';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = activeSkin.color;
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2 * frac); ctx.stroke();
+    ctx.restore();
+  }
+
+  // --- Loop ---
+  function loop(now) {
+    const dt = Math.min(0.05, (now - lastTick) / 1000);
+    lastTick = now;
+    if (state === STATE.PLAY) update(dt);
+    render();
+    if (state === STATE.PLAY) {
+      $timer.textContent = Math.max(0, waveTimeLeft).toFixed(1);
+      requestAnimationFrame(loop);
+    } else if (state === STATE.OVER) {
+      // keep rendering bursts a bit
+      render();
+    }
+  }
+
+  // --- Helpers ---
+  function hexA(hex, a) {
+    // accept #rrggbb
+    if (hex[0] !== '#') return `rgba(255,255,255,${a})`;
+    const n = parseInt(hex.slice(1), 16);
+    const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    return `rgba(${r},${g},${b},${a})`;
+  }
+
+  // --- Input ---
+  canvas.addEventListener('pointerdown', onTap);
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Space') { e.preventDefault(); onTap(e); }
+    if (e.code === 'Enter' && state !== STATE.PLAY) {
+      if (state === STATE.MENU) startGame();
+      else if (state === STATE.OVER) nextWaveContinue();
+    }
+  });
+
+  $startBtn.addEventListener('click', () => { ensureAudio(); startGame(); });
+  $nextBtn.addEventListener('click', () => { ensureAudio(); nextWaveContinue(); });
+  $menuBtn.addEventListener('click', () => {
+    state = STATE.MENU;
+    $gameover.classList.add('hidden');
+    $menu.classList.remove('hidden');
+    refreshMenu();
+  });
+
+  function refreshMenu() {
+    $best.textContent = save.best;
+    $bestWave.textContent = save.bestWave;
+    pickActiveSkin();
+    renderUnlocks();
+  }
+
+  // boot
+  refreshMenu();
+  // idle render so menu has something behind it
+  function idle() {
+    if (state === STATE.MENU) {
+      render();
+      requestAnimationFrame(idle);
+    }
+  }
+  requestAnimationFrame(idle);
+})();
+</script>
+</body>
+</html>

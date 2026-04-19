@@ -1,0 +1,1090 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<title>Star-Swipe — Constellation Tracing</title>
+<style>
+  :root {
+    --ink: #e9efff;
+    --muted: #8a96b8;
+    --accent: #b9d4ff;
+    --gold: #ffd98a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: #05060d;
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #game {
+    position: fixed;
+    inset: 0;
+    display: block;
+    cursor: crosshair;
+  }
+  .overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    pointer-events: none;
+    padding: 24px;
+    text-align: center;
+  }
+  .overlay.active { pointer-events: auto; }
+
+  .hud {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    padding: 18px 22px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    pointer-events: none;
+    z-index: 5;
+    font-weight: 300;
+    letter-spacing: 0.08em;
+  }
+  .hud .left, .hud .right { display: flex; flex-direction: column; gap: 4px; }
+  .hud .right { align-items: flex-end; }
+  .hud .label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.22em; }
+  .hud .value { font-size: 18px; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  .timer-bar {
+    position: fixed;
+    top: 0; left: 0;
+    height: 2px;
+    width: 100%;
+    background: rgba(255,255,255,0.04);
+    z-index: 4;
+  }
+  .timer-bar > div {
+    height: 100%;
+    width: 100%;
+    background: linear-gradient(90deg, #9fc0ff, #ffd98a);
+    transform-origin: left;
+    transition: transform 0.05s linear;
+    box-shadow: 0 0 12px rgba(159, 192, 255, 0.5);
+  }
+
+  h1 {
+    font-size: clamp(36px, 7vw, 64px);
+    font-weight: 200;
+    letter-spacing: 0.12em;
+    line-height: 1.05;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+  h1 .accent {
+    color: var(--gold);
+    font-weight: 300;
+  }
+  .tag {
+    color: var(--muted);
+    font-size: 14px;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    font-weight: 300;
+  }
+
+  .btn {
+    pointer-events: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 14px 34px;
+    border: 1px solid rgba(185, 212, 255, 0.35);
+    border-radius: 999px;
+    color: var(--ink);
+    background: rgba(185, 212, 255, 0.04);
+    font-size: 13px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    font-weight: 400;
+    cursor: pointer;
+    transition: background 180ms ease, transform 180ms ease, border-color 180ms ease;
+    backdrop-filter: blur(6px);
+  }
+  .btn:hover { background: rgba(185, 212, 255, 0.12); border-color: rgba(185, 212, 255, 0.6); }
+  .btn:active { transform: scale(0.98); }
+  .btn.ghost { border-color: rgba(255,255,255,0.12); color: var(--muted); }
+
+  .panel {
+    pointer-events: auto;
+    max-width: 560px;
+    background: rgba(8, 10, 22, 0.72);
+    border: 1px solid rgba(185, 212, 255, 0.12);
+    backdrop-filter: blur(14px);
+    border-radius: 18px;
+    padding: 28px 30px;
+    text-align: left;
+  }
+  .panel h2 {
+    font-size: 11px;
+    letter-spacing: 0.3em;
+    color: var(--muted);
+    text-transform: uppercase;
+    font-weight: 400;
+    margin-bottom: 14px;
+  }
+  .panel p { color: var(--ink); font-weight: 300; line-height: 1.6; font-size: 15px; }
+  .panel p + p { margin-top: 10px; }
+
+  .row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+  }
+  .big-stat {
+    font-size: 72px;
+    font-weight: 100;
+    letter-spacing: 0.05em;
+    color: var(--gold);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+  .sub-stat { color: var(--muted); font-size: 12px; letter-spacing: 0.25em; text-transform: uppercase; }
+
+  .themes {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-top: 8px;
+  }
+  .theme-chip {
+    pointer-events: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border: 1px solid rgba(185, 212, 255, 0.2);
+    border-radius: 999px;
+    cursor: pointer;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted);
+    transition: all 160ms ease;
+  }
+  .theme-chip.active { color: var(--ink); border-color: rgba(255,217,138,0.5); background: rgba(255,217,138,0.06); }
+  .theme-chip.locked { opacity: 0.35; cursor: not-allowed; }
+  .theme-chip .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent);
+  }
+
+  .map-wrap {
+    position: relative;
+    width: min(92vw, 520px);
+    aspect-ratio: 1 / 1;
+    margin: 0 auto;
+  }
+  #mapCanvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    border-radius: 18px;
+    background: radial-gradient(ellipse at center, #0a0f24 0%, #05060d 75%);
+    border: 1px solid rgba(185, 212, 255, 0.08);
+  }
+
+  .fade { transition: opacity 400ms ease; }
+  .hidden { opacity: 0; pointer-events: none !important; }
+
+  .flash-text {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    font-size: clamp(30px, 6vw, 56px);
+    font-weight: 200;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--gold);
+    text-shadow: 0 0 30px rgba(255,217,138,0.4);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 300ms ease, transform 600ms ease;
+    z-index: 10;
+  }
+  .flash-text.show { opacity: 1; transform: translate(-50%, -60%); }
+
+  footer {
+    position: fixed;
+    bottom: 14px;
+    left: 0; right: 0;
+    text-align: center;
+    font-size: 10px;
+    color: rgba(138, 150, 184, 0.5);
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="game"></canvas>
+
+<div class="timer-bar" id="timerBar" style="display:none"><div id="timerFill"></div></div>
+
+<div class="hud fade hidden" id="hud">
+  <div class="left">
+    <div class="label">Constellation</div>
+    <div class="value" id="hudName">—</div>
+  </div>
+  <div class="right">
+    <div class="label">Traced</div>
+    <div class="value" id="hudScore">0</div>
+  </div>
+</div>
+
+<!-- Title / Menu -->
+<div class="overlay active fade" id="menuOverlay">
+  <div class="tag">Chapter I · The Quiet Sky</div>
+  <h1>Star<span class="accent">·</span>Swipe</h1>
+  <div class="tag">Constellation Tracing</div>
+  <div style="height: 20px"></div>
+  <div class="row">
+    <button class="btn" id="playBtn">Begin</button>
+    <button class="btn ghost" id="mapBtn">Galaxy Map</button>
+  </div>
+  <div style="height: 8px"></div>
+  <div class="themes" id="themeList"></div>
+  <footer>Drag from star to star · Trace the hidden paths before they fade</footer>
+</div>
+
+<!-- Results -->
+<div class="overlay fade hidden" id="resultOverlay">
+  <div class="tag" id="resultLabel">Session Complete</div>
+  <div class="big-stat" id="resultScore">0</div>
+  <div class="sub-stat">constellations traced</div>
+  <div style="height: 14px"></div>
+  <div class="panel" id="discoveredPanel">
+    <h2>Discovered</h2>
+    <p id="discoveredList">—</p>
+  </div>
+  <div class="row">
+    <button class="btn" id="againBtn">Again</button>
+    <button class="btn ghost" id="backBtn">Sky Map</button>
+  </div>
+</div>
+
+<!-- Galaxy Map -->
+<div class="overlay fade hidden" id="mapOverlay">
+  <div class="tag">Galaxy Map</div>
+  <div class="map-wrap">
+    <canvas id="mapCanvas" width="1040" height="1040"></canvas>
+  </div>
+  <div class="tag" id="mapStats">— / — constellations</div>
+  <button class="btn ghost" id="mapBackBtn">Back</button>
+</div>
+
+<div class="flash-text" id="flash"></div>
+
+<script>
+(() => {
+  // ---------- utilities ----------
+  const $ = (id) => document.getElementById(id);
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+  const lerp = (a, b, t) => a + (b - a) * t;
+
+  // ---------- canvas setup ----------
+  const canvas = $("game");
+  const ctx = canvas.getContext("2d");
+  let W = 0, H = 0, DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W * DPR;
+    canvas.height = H * DPR;
+    canvas.style.width = W + "px";
+    canvas.style.height = H + "px";
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    regenerateBackdrop();
+  }
+  window.addEventListener("resize", resize);
+
+  // ---------- themes ----------
+  const THEMES = [
+    {
+      id: "quiet",
+      name: "Quiet Sky",
+      unlock: 0,
+      bgTop: "#070a18",
+      bgBot: "#02030a",
+      nebulaA: [80, 120, 200, 0.08],
+      nebulaB: [160, 120, 220, 0.05],
+      star: "#e9efff",
+      traced: "#ffd98a",
+      line: "#b9d4ff",
+    },
+    {
+      id: "aurora",
+      name: "Aurora",
+      unlock: 5,
+      bgTop: "#041a18",
+      bgBot: "#020508",
+      nebulaA: [80, 220, 170, 0.08],
+      nebulaB: [100, 180, 240, 0.06],
+      star: "#eaffee",
+      traced: "#a8ffd8",
+      line: "#8ef0c2",
+    },
+    {
+      id: "ember",
+      name: "Ember",
+      unlock: 12,
+      bgTop: "#1a0606",
+      bgBot: "#070104",
+      nebulaA: [240, 120, 90, 0.08],
+      nebulaB: [200, 60, 120, 0.06],
+      star: "#ffe9dc",
+      traced: "#ffb38a",
+      line: "#ff9a7a",
+    },
+    {
+      id: "violet",
+      name: "Violet Drift",
+      unlock: 22,
+      bgTop: "#0d0720",
+      bgBot: "#04010a",
+      nebulaA: [150, 80, 240, 0.1],
+      nebulaB: [80, 60, 200, 0.07],
+      star: "#f0e6ff",
+      traced: "#d6b8ff",
+      line: "#b59cff",
+    },
+    {
+      id: "gold",
+      name: "Golden Dusk",
+      unlock: 35,
+      bgTop: "#1a1405",
+      bgBot: "#070502",
+      nebulaA: [240, 200, 120, 0.1],
+      nebulaB: [180, 120, 60, 0.07],
+      star: "#fff4d6",
+      traced: "#ffd98a",
+      line: "#ffd98a",
+    },
+  ];
+
+  // ---------- save state ----------
+  const SAVE_KEY = "star-swipe.save.v1";
+  const save = loadSave();
+
+  function loadSave() {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return { totalTraced: 0, discovered: {}, theme: "quiet", best: 0 };
+  }
+  function persist() {
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {}
+  }
+
+  function currentTheme() {
+    return THEMES.find(t => t.id === save.theme) || THEMES[0];
+  }
+  function isUnlocked(theme) {
+    return save.totalTraced >= theme.unlock;
+  }
+
+  // ---------- constellation patterns ----------
+  // Each pattern uses unit coords in [-1, 1]. Edges reference node indices.
+  const PATTERNS = [
+    { name: "Little Bear", nodes: [[-0.7,0.3],[-0.3,0.1],[0.0,0.2],[0.3,0.0],[0.5,-0.3],[0.1,-0.4],[-0.2,-0.2]], edges: [[0,1],[1,2],[2,3],[3,4],[4,5],[5,6],[6,1]] },
+    { name: "Swan", nodes: [[-0.7,-0.3],[-0.2,0.0],[0.3,0.2],[0.0,-0.4],[0.5,-0.2],[-0.1,0.5],[0.2,0.5]], edges: [[0,1],[1,2],[1,3],[3,4],[5,1],[6,1]] },
+    { name: "Crown", nodes: [[-0.6,0.2],[-0.3,-0.2],[0.0,0.1],[0.3,-0.2],[0.6,0.2]], edges: [[0,1],[1,2],[2,3],[3,4]] },
+    { name: "Lyre", nodes: [[0.0,-0.5],[-0.4,-0.2],[0.4,-0.2],[-0.3,0.3],[0.3,0.3],[0.0,0.5]], edges: [[0,1],[0,2],[1,3],[2,4],[3,5],[4,5]] },
+    { name: "The Archer", nodes: [[-0.7,0.3],[-0.3,0.1],[0.0,-0.1],[0.3,-0.3],[0.6,-0.4],[0.1,0.4]], edges: [[0,1],[1,2],[2,3],[3,4],[2,5]] },
+    { name: "Serpent", nodes: [[-0.7,0.3],[-0.4,0.0],[-0.1,0.2],[0.2,-0.1],[0.5,0.1],[0.7,-0.2]], edges: [[0,1],[1,2],[2,3],[3,4],[4,5]] },
+    { name: "Hunter", nodes: [[-0.5,0.5],[0.1,0.4],[-0.2,0.1],[0.0,-0.1],[0.2,-0.3],[-0.4,-0.4],[0.5,-0.5]], edges: [[0,2],[1,3],[2,3],[3,4],[2,5],[4,6]] },
+    { name: "Dolphin", nodes: [[-0.5,0.0],[-0.2,-0.2],[0.1,-0.1],[0.3,0.2],[0.0,0.3],[-0.3,0.2]], edges: [[0,1],[1,2],[2,3],[3,4],[4,5],[5,0]] },
+    { name: "The Cup", nodes: [[-0.5,-0.3],[0.5,-0.3],[0.3,0.3],[-0.3,0.3],[0.0,0.5]], edges: [[0,1],[1,2],[2,4],[4,3],[3,0]] },
+    { name: "The Arrow", nodes: [[-0.6,0.0],[0.0,0.1],[0.5,0.0],[0.3,-0.2],[0.3,0.2]], edges: [[0,1],[1,2],[2,3],[2,4]] },
+    { name: "Phoenix", nodes: [[0.0,-0.5],[-0.3,-0.2],[0.3,-0.2],[-0.5,0.1],[0.5,0.1],[-0.2,0.4],[0.2,0.4]], edges: [[0,1],[0,2],[1,3],[2,4],[1,5],[2,6]] },
+    { name: "Twin Fish", nodes: [[-0.6,0.2],[-0.3,0.0],[0.0,0.2],[0.3,0.0],[0.6,0.2],[0.0,-0.3]], edges: [[0,1],[1,2],[2,3],[3,4],[1,5],[3,5]] },
+    { name: "Scales", nodes: [[-0.5,-0.2],[0.5,-0.2],[0.0,-0.1],[-0.5,0.3],[0.5,0.3]], edges: [[0,2],[2,1],[0,3],[1,4]] },
+    { name: "Waterbearer", nodes: [[-0.6,-0.2],[-0.2,-0.3],[0.2,-0.3],[0.6,-0.2],[0.0,0.0],[-0.2,0.3],[0.2,0.3]], edges: [[0,1],[1,2],[2,3],[1,4],[4,5],[4,6]] },
+    { name: "Whale", nodes: [[-0.7,0.0],[-0.3,-0.2],[0.1,-0.3],[0.5,-0.1],[0.7,0.2],[0.3,0.3],[-0.1,0.1]], edges: [[0,1],[1,2],[2,3],[3,4],[4,5],[5,6],[6,0]] },
+  ];
+
+  // ---------- game state ----------
+  const STATE = { MENU: "menu", PLAY: "play", RESULT: "result", MAP: "map" };
+  let state = STATE.MENU;
+  const SESSION_MS = 20000;
+
+  const game = {
+    startTime: 0,
+    remaining: 0,
+    score: 0,
+    combo: 0,
+    constellations: [], // active on screen
+    particles: [],
+    bgStars: [],
+    nebula: [],
+    discoveredThisRun: [],
+    trail: [],
+    activeTrace: null, // { constellation, edgeIndex, startNode }
+  };
+
+  // ---------- background starfield + nebula ----------
+  function regenerateBackdrop() {
+    game.bgStars = [];
+    const count = Math.floor(W * H / 2400);
+    for (let i = 0; i < count; i++) {
+      game.bgStars.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        r: Math.random() * 1.2 + 0.2,
+        a: Math.random() * 0.6 + 0.1,
+        tw: Math.random() * Math.PI * 2,
+        ts: rand(0.4, 1.6),
+      });
+    }
+    game.nebula = [];
+    for (let i = 0; i < 4; i++) {
+      game.nebula.push({
+        x: rand(0, W),
+        y: rand(0, H),
+        r: rand(Math.min(W, H) * 0.3, Math.min(W, H) * 0.7),
+        which: i % 2,
+      });
+    }
+  }
+
+  function drawBackdrop(t) {
+    const th = currentTheme();
+    // gradient
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, th.bgTop);
+    g.addColorStop(1, th.bgBot);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    // nebulae
+    for (const n of game.nebula) {
+      const col = n.which === 0 ? th.nebulaA : th.nebulaB;
+      const grad = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, n.r);
+      grad.addColorStop(0, `rgba(${col[0]},${col[1]},${col[2]},${col[3]})`);
+      grad.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // background stars
+    ctx.fillStyle = th.star;
+    for (const s of game.bgStars) {
+      const tw = 0.6 + 0.4 * Math.sin(t * 0.001 * s.ts + s.tw);
+      ctx.globalAlpha = s.a * tw;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // ---------- constellation spawning ----------
+  function spawnConstellation() {
+    const pattern = PATTERNS[Math.floor(Math.random() * PATTERNS.length)];
+    const scale = Math.min(W, H) * rand(0.12, 0.20);
+    const margin = scale + 40;
+    const cx = rand(margin, W - margin);
+    const cy = rand(margin + 60, H - margin - 40);
+    const rot = rand(-0.3, 0.3);
+    const flip = Math.random() < 0.5 ? -1 : 1;
+
+    const nodes = pattern.nodes.map(([nx, ny]) => {
+      const x = nx * flip;
+      const y = ny;
+      const rx = Math.cos(rot) * x - Math.sin(rot) * y;
+      const ry = Math.sin(rot) * x + Math.cos(rot) * y;
+      return {
+        x: cx + rx * scale,
+        y: cy + ry * scale,
+        r: rand(3.5, 5.5),
+        glow: 0,
+      };
+    });
+
+    const edges = pattern.edges.map(([a, b]) => ({ a, b, traced: false }));
+
+    const life = SESSION_MS * rand(0.45, 0.7);
+    return {
+      pattern,
+      name: pattern.name,
+      nodes,
+      edges,
+      born: performance.now(),
+      life,
+      appear: 0,
+      fading: false,
+      done: false,
+      doneAt: 0,
+      cx, cy,
+    };
+  }
+
+  function maintainConstellations(now) {
+    // cull completed or expired
+    game.constellations = game.constellations.filter(c => {
+      if (c.done && now - c.doneAt > 900) return false;
+      if (!c.done && now - c.born > c.life) return false;
+      return true;
+    });
+    // spawn to maintain 2-3 on screen during active play
+    const desired = 2 + (W > 700 ? 1 : 0);
+    while (game.constellations.length < desired && state === STATE.PLAY && game.remaining > 1500) {
+      // try to spawn without overlap
+      let tries = 0, cand = null;
+      while (tries++ < 8) {
+        cand = spawnConstellation();
+        let ok = true;
+        for (const c of game.constellations) {
+          const d = Math.hypot(c.cx - cand.cx, c.cy - cand.cy);
+          if (d < 220) { ok = false; break; }
+        }
+        if (ok) break;
+      }
+      if (cand) game.constellations.push(cand);
+    }
+  }
+
+  // ---------- drawing constellations ----------
+  function drawConstellations(now) {
+    const th = currentTheme();
+    for (const c of game.constellations) {
+      const age = now - c.born;
+      const remain = c.life - age;
+      let alpha = 1;
+      if (age < 500) alpha = age / 500; // fade in
+      else if (remain < 1200 && !c.done) alpha = clamp(remain / 1200, 0, 1);
+      if (c.done) {
+        const t = clamp((now - c.doneAt) / 900, 0, 1);
+        alpha = 1 - t;
+      }
+
+      // edges
+      for (const e of c.edges) {
+        const a = c.nodes[e.a];
+        const b = c.nodes[e.b];
+        if (e.traced) {
+          // traced: glowing gold line
+          ctx.strokeStyle = hexWithAlpha(th.traced, alpha);
+          ctx.lineWidth = 2.2;
+          ctx.shadowBlur = 14;
+          ctx.shadowColor = th.traced;
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+        } else {
+          // untraced: faint dashed hint
+          ctx.strokeStyle = hexWithAlpha(th.line, alpha * 0.18);
+          ctx.lineWidth = 1;
+          ctx.setLineDash([3, 6]);
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+      }
+
+      // nodes
+      for (let i = 0; i < c.nodes.length; i++) {
+        const n = c.nodes[i];
+        const glow = Math.max(n.glow, 0);
+        const r = n.r + glow * 4;
+        // soft halo
+        const grad = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, r * 4);
+        grad.addColorStop(0, hexWithAlpha(th.star, 0.55 * alpha));
+        grad.addColorStop(1, hexWithAlpha(th.star, 0));
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, r * 4, 0, Math.PI * 2);
+        ctx.fill();
+        // core
+        ctx.fillStyle = hexWithAlpha(th.star, alpha);
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+        ctx.fill();
+        n.glow *= 0.9;
+      }
+
+      // name label when complete (fading)
+      if (c.done) {
+        const t = clamp((now - c.doneAt) / 900, 0, 1);
+        ctx.save();
+        ctx.globalAlpha = (1 - t) * 0.9;
+        ctx.fillStyle = th.traced;
+        ctx.font = "300 13px -apple-system, system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = th.traced;
+        ctx.fillText(c.name.toUpperCase(), c.cx, c.cy - 20 - t * 14);
+        ctx.restore();
+        ctx.shadowBlur = 0;
+      }
+    }
+  }
+
+  function hexWithAlpha(hex, a) {
+    // converts #rrggbb to rgba
+    const h = hex.replace("#", "");
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    return `rgba(${r},${g},${b},${a})`;
+  }
+
+  // ---------- trail / swipe ----------
+  function drawTrail() {
+    if (game.trail.length < 2) return;
+    const th = currentTheme();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (let i = 1; i < game.trail.length; i++) {
+      const p0 = game.trail[i - 1];
+      const p1 = game.trail[i];
+      const age = performance.now() - p1.t;
+      const a = clamp(1 - age / 500, 0, 1);
+      if (a <= 0) continue;
+      ctx.strokeStyle = hexWithAlpha(th.line, a * 0.8);
+      ctx.lineWidth = 2 + a * 2;
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = th.line;
+      ctx.beginPath();
+      ctx.moveTo(p0.x, p0.y);
+      ctx.lineTo(p1.x, p1.y);
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+  }
+
+  function pruneTrail(now) {
+    game.trail = game.trail.filter(p => now - p.t < 500);
+  }
+
+  // ---------- particles (completion bursts) ----------
+  function spawnBurst(x, y, color) {
+    for (let i = 0; i < 28; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const sp = rand(40, 180);
+      game.particles.push({
+        x, y,
+        vx: Math.cos(ang) * sp,
+        vy: Math.sin(ang) * sp,
+        life: rand(500, 1000),
+        born: performance.now(),
+        color,
+        r: rand(1, 2.4),
+      });
+    }
+  }
+  function drawParticles(dt, now) {
+    game.particles = game.particles.filter(p => now - p.born < p.life);
+    for (const p of game.particles) {
+      const t = (now - p.born) / p.life;
+      const a = 1 - t;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= 0.96;
+      p.vy *= 0.96;
+      ctx.fillStyle = hexWithAlpha(p.color, a);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // ---------- input + tracing logic ----------
+  let pointer = { down: false, x: 0, y: 0, lastHit: null };
+
+  function pointerPos(ev) {
+    const e = (ev.touches && ev.touches[0]) || ev;
+    return { x: e.clientX, y: e.clientY };
+  }
+
+  function findNodeAt(x, y) {
+    const hitR = 26;
+    for (const c of game.constellations) {
+      if (c.done) continue;
+      for (let i = 0; i < c.nodes.length; i++) {
+        const n = c.nodes[i];
+        if (Math.hypot(n.x - x, n.y - y) < hitR) return { c, i };
+      }
+    }
+    return null;
+  }
+
+  function findAdjacentUntracedEdge(c, fromIndex, toIndex) {
+    for (const e of c.edges) {
+      if (e.traced) continue;
+      if ((e.a === fromIndex && e.b === toIndex) ||
+          (e.b === fromIndex && e.a === toIndex)) {
+        return e;
+      }
+    }
+    return null;
+  }
+
+  function segIntersects(ax, ay, bx, by, edge, c) {
+    // check if the swipe segment (a->b) crosses an edge within tolerance (line to line)
+    const p = c.nodes[edge.a];
+    const q = c.nodes[edge.b];
+    return segSegClose(ax, ay, bx, by, p.x, p.y, q.x, q.y);
+  }
+
+  function segSegClose(ax, ay, bx, by, cx, cy, dx, dy) {
+    // proper segment intersection test
+    const d1x = bx - ax, d1y = by - ay;
+    const d2x = dx - cx, d2y = dy - cy;
+    const denom = d1x * d2y - d1y * d2x;
+    if (Math.abs(denom) < 1e-6) return false;
+    const s = ((cx - ax) * d2y - (cy - ay) * d2x) / denom;
+    const t = ((cx - ax) * d1y - (cy - ay) * d1x) / denom;
+    return s >= 0 && s <= 1 && t >= 0 && t <= 1;
+  }
+
+  function onPointerDown(ev) {
+    if (state !== STATE.PLAY) return;
+    ev.preventDefault();
+    pointer.down = true;
+    const p = pointerPos(ev);
+    pointer.x = p.x; pointer.y = p.y;
+    game.trail = [{ x: p.x, y: p.y, t: performance.now() }];
+    const hit = findNodeAt(p.x, p.y);
+    pointer.lastHit = hit;
+    if (hit) hit.c.nodes[hit.i].glow = 1;
+  }
+
+  function onPointerMove(ev) {
+    if (state !== STATE.PLAY) return;
+    if (!pointer.down) return;
+    ev.preventDefault();
+    const p = pointerPos(ev);
+    const prev = { x: pointer.x, y: pointer.y };
+    pointer.x = p.x; pointer.y = p.y;
+    game.trail.push({ x: p.x, y: p.y, t: performance.now() });
+
+    // Primary: star-to-star detection (most forgiving, swipe-feel)
+    const hit = findNodeAt(p.x, p.y);
+    if (hit) {
+      hit.c.nodes[hit.i].glow = 1;
+      if (pointer.lastHit && (pointer.lastHit.c !== hit.c || pointer.lastHit.i !== hit.i)) {
+        if (pointer.lastHit.c === hit.c) {
+          const edge = findAdjacentUntracedEdge(hit.c, pointer.lastHit.i, hit.i);
+          if (edge) traceEdge(hit.c, edge);
+        }
+      }
+      pointer.lastHit = hit;
+    } else {
+      // Secondary: sweep intersection — if the swipe segment crosses an edge incident to lastHit
+      if (pointer.lastHit) {
+        const c = pointer.lastHit.c;
+        for (const e of c.edges) {
+          if (e.traced) continue;
+          if (e.a !== pointer.lastHit.i && e.b !== pointer.lastHit.i) continue;
+          if (segIntersects(prev.x, prev.y, p.x, p.y, e, c)) {
+            const other = e.a === pointer.lastHit.i ? e.b : e.a;
+            traceEdge(c, e);
+            pointer.lastHit = { c, i: other };
+            c.nodes[other].glow = 1;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  function onPointerUp() {
+    if (state !== STATE.PLAY) return;
+    pointer.down = false;
+    pointer.lastHit = null;
+  }
+
+  function traceEdge(c, edge) {
+    edge.traced = true;
+    // check completion
+    if (c.edges.every(e => e.traced)) {
+      c.done = true;
+      c.doneAt = performance.now();
+      game.score += 1;
+      save.totalTraced += 1;
+      save.discovered[c.name] = (save.discovered[c.name] || 0) + 1;
+      game.discoveredThisRun.push(c.name);
+      persist();
+      const th = currentTheme();
+      spawnBurst(c.cx, c.cy, th.traced);
+      flashText(c.name);
+      updateHUD();
+      refreshThemeChips();
+    } else {
+      updateHUD();
+    }
+  }
+
+  canvas.addEventListener("mousedown", onPointerDown);
+  canvas.addEventListener("mousemove", onPointerMove);
+  window.addEventListener("mouseup", onPointerUp);
+  canvas.addEventListener("touchstart", onPointerDown, { passive: false });
+  canvas.addEventListener("touchmove", onPointerMove, { passive: false });
+  window.addEventListener("touchend", onPointerUp);
+  window.addEventListener("touchcancel", onPointerUp);
+
+  // ---------- flash ----------
+  let flashTimer = null;
+  function flashText(s) {
+    const el = $("flash");
+    el.textContent = s;
+    el.classList.remove("show");
+    // re-trigger transition
+    void el.offsetWidth;
+    el.classList.add("show");
+    if (flashTimer) clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => el.classList.remove("show"), 900);
+  }
+
+  // ---------- HUD ----------
+  function updateHUD() {
+    $("hudScore").textContent = game.score;
+    // show name of the most recently interacted constellation
+    const active = game.constellations.find(c => c.edges.some(e => e.traced) && !c.done);
+    const done = game.constellations.find(c => c.done);
+    const name = active ? active.name : (done ? done.name : "—");
+    $("hudName").textContent = name;
+  }
+
+  // ---------- loop ----------
+  let lastT = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - lastT) / 1000);
+    lastT = now;
+
+    drawBackdrop(now);
+
+    if (state === STATE.PLAY) {
+      game.remaining = SESSION_MS - (now - game.startTime);
+      if (game.remaining <= 0) {
+        endSession();
+      } else {
+        $("timerFill").style.transform = `scaleX(${clamp(game.remaining / SESSION_MS, 0, 1)})`;
+      }
+      maintainConstellations(now);
+    }
+
+    drawConstellations(now);
+    pruneTrail(now);
+    drawTrail();
+    drawParticles(dt, now);
+
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- session control ----------
+  function startSession() {
+    state = STATE.PLAY;
+    game.score = 0;
+    game.combo = 0;
+    game.constellations = [];
+    game.particles = [];
+    game.trail = [];
+    game.discoveredThisRun = [];
+    game.startTime = performance.now();
+    game.remaining = SESSION_MS;
+    $("hud").classList.remove("hidden");
+    $("timerBar").style.display = "block";
+    $("menuOverlay").classList.add("hidden");
+    $("resultOverlay").classList.add("hidden");
+    $("mapOverlay").classList.add("hidden");
+    $("menuOverlay").classList.remove("active");
+    updateHUD();
+  }
+
+  function endSession() {
+    state = STATE.RESULT;
+    $("hud").classList.add("hidden");
+    $("timerBar").style.display = "none";
+    $("resultScore").textContent = game.score;
+    save.best = Math.max(save.best || 0, game.score);
+    persist();
+
+    const unique = Array.from(new Set(game.discoveredThisRun));
+    $("discoveredList").textContent = unique.length ? unique.join(" · ") : "None this time — the sky rests.";
+    $("resultOverlay").classList.remove("hidden");
+    $("resultOverlay").classList.add("active");
+
+    // pop any newly unlocked theme
+    checkNewUnlock();
+  }
+
+  function checkNewUnlock() {
+    for (const t of THEMES) {
+      if (!isUnlocked(t)) continue;
+      const key = "notified_" + t.id;
+      if (!save[key]) {
+        save[key] = true;
+        persist();
+        if (t.unlock > 0) flashText("Theme Unlocked · " + t.name);
+      }
+    }
+  }
+
+  // ---------- menu + theme chips ----------
+  function refreshThemeChips() {
+    const list = $("themeList");
+    list.innerHTML = "";
+    for (const t of THEMES) {
+      const chip = document.createElement("div");
+      const unlocked = isUnlocked(t);
+      chip.className = "theme-chip" + (save.theme === t.id ? " active" : "") + (unlocked ? "" : " locked");
+      const label = unlocked ? t.name : `${t.name} · ${t.unlock} traced`;
+      chip.innerHTML = `<span class="dot" style="background:${t.traced}"></span>${label}`;
+      if (unlocked) {
+        chip.addEventListener("click", () => {
+          save.theme = t.id;
+          persist();
+          refreshThemeChips();
+        });
+      }
+      list.appendChild(chip);
+    }
+  }
+
+  // ---------- galaxy map ----------
+  function drawGalaxyMap() {
+    const c = $("mapCanvas");
+    const g = c.getContext("2d");
+    const w = c.width, h = c.height;
+    g.clearRect(0, 0, w, h);
+    // backdrop
+    const grad = g.createRadialGradient(w/2, h/2, 0, w/2, h/2, w*0.7);
+    grad.addColorStop(0, "#0a1028");
+    grad.addColorStop(1, "#03040a");
+    g.fillStyle = grad;
+    g.fillRect(0, 0, w, h);
+
+    // dust stars (seeded)
+    let seed = 1337;
+    const rnd = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+    g.fillStyle = "rgba(233, 239, 255, 0.35)";
+    for (let i = 0; i < 500; i++) {
+      const x = rnd() * w, y = rnd() * h, r = rnd() * 1.2 + 0.2;
+      g.globalAlpha = 0.2 + rnd() * 0.6;
+      g.beginPath(); g.arc(x, y, r, 0, Math.PI*2); g.fill();
+    }
+    g.globalAlpha = 1;
+
+    // constellation nodes placed on a spiral
+    const total = PATTERNS.length;
+    for (let i = 0; i < total; i++) {
+      const p = PATTERNS[i];
+      const discovered = save.discovered[p.name] > 0;
+      const count = save.discovered[p.name] || 0;
+      const t = i / total;
+      const ang = t * Math.PI * 6 + 0.3;
+      const rad = 70 + t * (Math.min(w, h) * 0.42);
+      const x = w/2 + Math.cos(ang) * rad;
+      const y = h/2 + Math.sin(ang) * rad;
+
+      // connective glow arm
+      if (i > 0) {
+        const pi = i - 1;
+        const pt = pi / total;
+        const pang = pt * Math.PI * 6 + 0.3;
+        const prad = 70 + pt * (Math.min(w, h) * 0.42);
+        const px = w/2 + Math.cos(pang) * prad;
+        const py = h/2 + Math.sin(pang) * prad;
+        g.strokeStyle = discovered ? "rgba(255,217,138,0.35)" : "rgba(185,212,255,0.08)";
+        g.lineWidth = 1;
+        g.beginPath(); g.moveTo(px, py); g.lineTo(x, y); g.stroke();
+      }
+
+      // node
+      const color = discovered ? "#ffd98a" : "#8a96b8";
+      g.shadowBlur = discovered ? 18 : 0;
+      g.shadowColor = "#ffd98a";
+      g.fillStyle = color;
+      g.beginPath(); g.arc(x, y, discovered ? 6 : 3, 0, Math.PI*2); g.fill();
+      g.shadowBlur = 0;
+
+      // label
+      g.fillStyle = discovered ? "rgba(233,239,255,0.9)" : "rgba(138,150,184,0.5)";
+      g.font = "300 14px -apple-system, system-ui, sans-serif";
+      g.textAlign = "center";
+      g.fillText(p.name, x, y - 14);
+      if (discovered && count > 1) {
+        g.fillStyle = "rgba(255,217,138,0.7)";
+        g.font = "300 11px -apple-system, system-ui, sans-serif";
+        g.fillText("×" + count, x, y + 22);
+      }
+    }
+
+    const found = Object.keys(save.discovered).length;
+    $("mapStats").textContent = `${found} / ${PATTERNS.length} constellations · ${save.totalTraced} total traced`;
+  }
+
+  function openMap() {
+    state = STATE.MAP;
+    $("menuOverlay").classList.add("hidden");
+    $("resultOverlay").classList.add("hidden");
+    $("mapOverlay").classList.remove("hidden");
+    $("mapOverlay").classList.add("active");
+    drawGalaxyMap();
+  }
+  function closeMap() {
+    state = STATE.MENU;
+    $("mapOverlay").classList.add("hidden");
+    $("mapOverlay").classList.remove("active");
+    $("menuOverlay").classList.remove("hidden");
+    $("menuOverlay").classList.add("active");
+    refreshThemeChips();
+  }
+
+  // ---------- wiring ----------
+  $("playBtn").addEventListener("click", startSession);
+  $("mapBtn").addEventListener("click", openMap);
+  $("mapBackBtn").addEventListener("click", closeMap);
+  $("againBtn").addEventListener("click", () => {
+    $("resultOverlay").classList.add("hidden");
+    $("resultOverlay").classList.remove("active");
+    startSession();
+  });
+  $("backBtn").addEventListener("click", () => {
+    state = STATE.MENU;
+    $("resultOverlay").classList.add("hidden");
+    $("resultOverlay").classList.remove("active");
+    $("menuOverlay").classList.remove("hidden");
+    $("menuOverlay").classList.add("active");
+    refreshThemeChips();
+  });
+
+  // init
+  resize();
+  refreshThemeChips();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
