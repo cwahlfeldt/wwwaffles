@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Slide-Strike</title>
+<style>
+  :root {
+    --ice: #e8f4ff;
+    --ice-dark: #b8d4ea;
+    --goal: #ff3860;
+    --accent: #ffd166;
+    --ink: #0a1628;
+    --panel: rgba(10, 22, 40, 0.92);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #050a14;
+    color: #fff;
+    touch-action: none;
+    user-select: none;
+  }
+  #wrap {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  canvas {
+    display: block;
+    background: linear-gradient(180deg, #0a1628 0%, #132a4a 100%);
+    touch-action: none;
+    max-width: 100%;
+    max-height: 100%;
+  }
+  .overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    padding: 24px;
+  }
+  .panel {
+    pointer-events: auto;
+    background: var(--panel);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 20px;
+    padding: 28px 32px;
+    max-width: 420px;
+    width: 100%;
+    text-align: center;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  h1 {
+    font-size: 36px;
+    font-weight: 800;
+    letter-spacing: -1px;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, #ffd166 0%, #ff3860 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  h2 { font-size: 24px; font-weight: 700; margin-bottom: 12px; }
+  p { color: #9fb3c8; margin-bottom: 16px; font-size: 14px; line-height: 1.5; }
+  .score-big { font-size: 56px; font-weight: 800; color: var(--accent); margin: 8px 0; }
+  .stat-row { display: flex; justify-content: space-around; margin: 16px 0; }
+  .stat { }
+  .stat-label { font-size: 11px; color: #7a8fa8; text-transform: uppercase; letter-spacing: 1px; }
+  .stat-val { font-size: 20px; font-weight: 700; margin-top: 4px; }
+  button {
+    font: inherit;
+    font-weight: 700;
+    font-size: 16px;
+    color: var(--ink);
+    background: var(--accent);
+    border: none;
+    border-radius: 12px;
+    padding: 14px 24px;
+    cursor: pointer;
+    width: 100%;
+    margin-top: 8px;
+    transition: transform 0.1s, box-shadow 0.1s;
+  }
+  button:active { transform: scale(0.97); }
+  button.ghost {
+    background: rgba(255,255,255,0.08);
+    color: #fff;
+    border: 1px solid rgba(255,255,255,0.15);
+  }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .puck-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin: 16px 0;
+  }
+  .puck-card {
+    background: rgba(255,255,255,0.05);
+    border: 2px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 12px 8px;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.15s;
+  }
+  .puck-card:hover:not(.locked) { border-color: rgba(255,209,102,0.5); }
+  .puck-card.selected { border-color: var(--accent); background: rgba(255,209,102,0.1); }
+  .puck-card.locked { opacity: 0.5; cursor: not-allowed; }
+  .puck-name { font-weight: 700; font-size: 13px; margin-top: 4px; }
+  .puck-desc { font-size: 10px; color: #9fb3c8; margin-top: 2px; }
+  .puck-req { font-size: 10px; color: var(--goal); margin-top: 2px; }
+  .puck-visual {
+    width: 32px; height: 32px; border-radius: 50%;
+    margin: 0 auto;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  }
+  .hud {
+    position: absolute;
+    top: 16px; left: 16px; right: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    pointer-events: none;
+    font-weight: 700;
+  }
+  .hud-box {
+    background: rgba(10,22,40,0.7);
+    backdrop-filter: blur(6px);
+    border-radius: 10px;
+    padding: 8px 14px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+  .hud-label { font-size: 10px; color: #7a8fa8; text-transform: uppercase; letter-spacing: 1px; }
+  .hud-val { font-size: 22px; font-weight: 800; }
+  .time-bar {
+    height: 4px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-top: 6px;
+    width: 120px;
+  }
+  .time-fill { height: 100%; background: var(--accent); transition: width 0.1s linear, background 0.2s; }
+  .hidden { display: none !important; }
+  .burst {
+    position: absolute;
+    font-size: 42px;
+    font-weight: 800;
+    color: var(--accent);
+    text-shadow: 0 4px 16px rgba(0,0,0,0.6);
+    pointer-events: none;
+    animation: burst 0.8s ease-out forwards;
+  }
+  @keyframes burst {
+    0% { transform: translate(-50%, -50%) scale(0.4); opacity: 0; }
+    20% { transform: translate(-50%, -50%) scale(1.2); opacity: 1; }
+    100% { transform: translate(-50%, -120%) scale(1); opacity: 0; }
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game"></canvas>
+  <div class="hud hidden" id="hud">
+    <div class="hud-box">
+      <div class="hud-label">Score</div>
+      <div class="hud-val" id="hudScore">0</div>
+    </div>
+    <div class="hud-box" style="text-align:right">
+      <div class="hud-label">Time</div>
+      <div class="hud-val" id="hudTime">15.0</div>
+      <div class="time-bar"><div class="time-fill" id="timeFill" style="width:100%"></div></div>
+    </div>
+  </div>
+
+  <div class="overlay" id="menuOverlay">
+    <div class="panel">
+      <h1>Slide-Strike</h1>
+      <p>Flick the puck into the goal. Bounce off walls, dodge defenders. 15 seconds — score as much as you can.</p>
+      <div class="stat-row">
+        <div class="stat">
+          <div class="stat-label">Best</div>
+          <div class="stat-val" id="bestScore">0</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Total Goals</div>
+          <div class="stat-val" id="totalGoals">0</div>
+        </div>
+      </div>
+      <div class="puck-grid" id="puckGrid"></div>
+      <button id="playBtn">Play</button>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="endOverlay">
+    <div class="panel">
+      <h2 id="endTitle">Time's Up</h2>
+      <div class="score-big" id="endScore">0</div>
+      <p id="endMsg"></p>
+      <div class="stat-row">
+        <div class="stat">
+          <div class="stat-label">Goals</div>
+          <div class="stat-val" id="endGoals">0</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Best Streak</div>
+          <div class="stat-val" id="endStreak">0</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Best</div>
+          <div class="stat-val" id="endBest">0</div>
+        </div>
+      </div>
+      <button id="playAgainBtn">Play Again</button>
+      <button class="ghost" id="menuBtn">Change Puck</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+
+  // Logical play field (game units). Rendered scaled to fit viewport.
+  const FIELD_W = 400;
+  const FIELD_H = 640;
+
+  // Layout in field coords
+  const WALL = 12;
+  const GOAL_W = 140;
+  const GOAL_DEPTH = 24;
+  const PUCK_SPAWN_Y = FIELD_H - 90;
+  const PUCK_R = 14;
+
+  // DPI / scale
+  let scale = 1;
+  let offsetX = 0, offsetY = 0;
+
+  function resize() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+    // Fit field into viewport, keep aspect ratio
+    const ratio = FIELD_W / FIELD_H;
+    let cw, ch;
+    if (w / h > ratio) {
+      ch = h;
+      cw = h * ratio;
+    } else {
+      cw = w;
+      ch = w / ratio;
+    }
+    canvas.style.width = cw + 'px';
+    canvas.style.height = ch + 'px';
+    canvas.width = Math.round(cw * dpr);
+    canvas.height = Math.round(ch * dpr);
+    scale = (canvas.width / FIELD_W);
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // --- Puck types (unlockables) ---
+  const PUCKS = [
+    { id: 'standard', name: 'Standard', desc: 'Balanced feel', color: '#ffd166', glow: '#ffb347',
+      mass: 1.0, friction: 0.992, restitution: 0.88, speedMul: 1.0, curve: 0, unlock: 0 },
+    { id: 'heavy',    name: 'Heavy',    desc: 'Plows through defenders', color: '#8892a8', glow: '#b8c5d9',
+      mass: 2.2, friction: 0.994, restitution: 0.72, speedMul: 0.85, curve: 0, unlock: 25 },
+    { id: 'bouncy',   name: 'Bouncy',   desc: 'Maximum ricochets', color: '#5ce1e6', glow: '#a8f0f2',
+      mass: 0.8, friction: 0.997, restitution: 0.98, speedMul: 1.05, curve: 0, unlock: 50 },
+    { id: 'curve',    name: 'Curve',    desc: 'Bends around corners', color: '#ff6bcb', glow: '#ffb3e3',
+      mass: 0.9, friction: 0.993, restitution: 0.85, speedMul: 1.0, curve: 0.9, unlock: 100 },
+  ];
+
+  // --- Storage ---
+  const SAVE_KEY = 'slideStrikeSave_v1';
+  const save = loadSave();
+  function loadSave() {
+    try {
+      const s = JSON.parse(localStorage.getItem(SAVE_KEY) || '{}');
+      return {
+        best: s.best || 0,
+        totalGoals: s.totalGoals || 0,
+        selectedPuck: s.selectedPuck || 'standard',
+      };
+    } catch { return { best: 0, totalGoals: 0, selectedPuck: 'standard' }; }
+  }
+  function persist() { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); }
+
+  // --- Game state ---
+  const state = {
+    running: false,
+    time: 15,
+    score: 0,
+    goals: 0,
+    streak: 0,
+    bestStreak: 0,
+    puck: null,
+    defenders: [],
+    obstacles: [],
+    particles: [],
+    bursts: [],
+    aim: null, // {x0,y0,x,y}
+    shakeT: 0, shakeMag: 0,
+    spawnCooldown: 0,
+    puckType: PUCKS[0],
+    lastGoalT: -999,
+  };
+
+  // --- Entities ---
+  function makePuck(type) {
+    return {
+      x: FIELD_W / 2, y: PUCK_SPAWN_Y,
+      vx: 0, vy: 0,
+      r: PUCK_R,
+      mass: type.mass,
+      friction: type.friction,
+      restitution: type.restitution,
+      speedMul: type.speedMul,
+      curve: type.curve,
+      color: type.color,
+      glow: type.glow,
+      alive: true,
+      moving: false,
+      trail: [],
+    };
+  }
+
+  function makeDefender(x, y, w, h, vx, range) {
+    return {
+      x, y, w, h,
+      vx, vy: 0,
+      originX: x,
+      range,
+      color: '#ff3860',
+    };
+  }
+
+  function makeObstacle(x, y, r) {
+    return { x, y, r, color: '#3d5a80' };
+  }
+
+  function setupLevel() {
+    state.defenders = [];
+    state.obstacles = [];
+    // A horizontally-moving bar defender near the goal
+    state.defenders.push(makeDefender(FIELD_W / 2 - 36, 120, 72, 16, 1.6, 110));
+    // A small fast defender
+    state.defenders.push(makeDefender(FIELD_W / 2 - 22, 220, 44, 14, -2.3, 140));
+    // Static obstacles (bumpers)
+    state.obstacles.push(makeObstacle(110, 340, 18));
+    state.obstacles.push(makeObstacle(FIELD_W - 110, 340, 18));
+    state.obstacles.push(makeObstacle(FIELD_W / 2, 440, 14));
+  }
+
+  function resetPuck() {
+    state.puck = makePuck(state.puckType);
+  }
+
+  // --- Input (flick / swipe) ---
+  const MAX_AIM_LEN = 180; // field units; clamp drag length
+  const LAUNCH_SPEED_K = 0.14; // drag pixels → velocity
+
+  function clientToField(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const x = (clientX - rect.left) / rect.width * FIELD_W;
+    const y = (clientY - rect.top) / rect.height * FIELD_H;
+    return { x, y };
+  }
+
+  function startAim(x, y) {
+    if (!state.running) return;
+    if (!state.puck || state.puck.moving) return;
+    // Require touching near the puck
+    const dx = x - state.puck.x, dy = y - state.puck.y;
+    const d = Math.hypot(dx, dy);
+    if (d > 70) return; // too far from puck
+    state.aim = { x0: state.puck.x, y0: state.puck.y, x, y };
+  }
+  function moveAim(x, y) {
+    if (!state.aim) return;
+    state.aim.x = x;
+    state.aim.y = y;
+  }
+  function endAim(x, y) {
+    if (!state.aim) return;
+    // Drag vector: from current pointer back to puck (pull-back slingshot)
+    const dx = state.aim.x0 - x;
+    const dy = state.aim.y0 - y;
+    const len = Math.hypot(dx, dy);
+    state.aim = null;
+    if (len < 8) return; // tap, no launch
+    const clamped = Math.min(len, MAX_AIM_LEN);
+    const nx = dx / len, ny = dy / len;
+    const speed = clamped * LAUNCH_SPEED_K * 60 * state.puck.speedMul;
+    state.puck.vx = nx * speed / 60;
+    state.puck.vy = ny * speed / 60;
+    state.puck.moving = true;
+  }
+
+  canvas.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    canvas.setPointerCapture(e.pointerId);
+    const p = clientToField(e.clientX, e.clientY);
+    startAim(p.x, p.y);
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!state.aim) return;
+    const p = clientToField(e.clientX, e.clientY);
+    moveAim(p.x, p.y);
+  });
+  canvas.addEventListener('pointerup', (e) => {
+    const p = clientToField(e.clientX, e.clientY);
+    endAim(p.x, p.y);
+  });
+  canvas.addEventListener('pointercancel', () => { state.aim = null; });
+
+  // --- Physics ---
+  function stepPhysics(dt) {
+    const p = state.puck;
+    if (!p) return;
+
+    // Curve: slight lateral acceleration based on velocity perpendicular (only while moving fast)
+    if (p.moving && p.curve !== 0) {
+      const sp = Math.hypot(p.vx, p.vy);
+      if (sp > 0.5) {
+        // Perpendicular to velocity
+        const px = -p.vy / sp, py = p.vx / sp;
+        const k = p.curve * 0.25; // curvature strength
+        p.vx += px * k * dt * 60;
+        p.vy += py * k * dt * 60;
+      }
+    }
+
+    // Integrate (dt in seconds, velocities in units per frame -> multiply by 60)
+    p.x += p.vx * dt * 60;
+    p.y += p.vy * dt * 60;
+
+    // Friction (per-frame)
+    const fr = Math.pow(p.friction, dt * 60);
+    p.vx *= fr; p.vy *= fr;
+
+    // Trail
+    p.trail.push({ x: p.x, y: p.y, t: 0 });
+    if (p.trail.length > 14) p.trail.shift();
+    for (const pt of p.trail) pt.t += dt;
+
+    // Wall collisions (field bounds minus goal opening at top)
+    const e = p.restitution;
+    // Left wall
+    if (p.x - p.r < WALL) {
+      p.x = WALL + p.r;
+      p.vx = -p.vx * e;
+      onBounce();
+    }
+    // Right wall
+    if (p.x + p.r > FIELD_W - WALL) {
+      p.x = FIELD_W - WALL - p.r;
+      p.vx = -p.vx * e;
+      onBounce();
+    }
+    // Bottom wall
+    if (p.y + p.r > FIELD_H - WALL) {
+      p.y = FIELD_H - WALL - p.r;
+      p.vy = -p.vy * e;
+      onBounce();
+    }
+    // Top wall — has a goal gap
+    const goalL = (FIELD_W - GOAL_W) / 2;
+    const goalR = (FIELD_W + GOAL_W) / 2;
+    if (p.y - p.r < WALL) {
+      const inGoalX = p.x > goalL && p.x < goalR;
+      if (!inGoalX) {
+        p.y = WALL + p.r;
+        p.vy = -p.vy * e;
+        onBounce();
+      }
+      // Goal posts
+      const postCollide = (px) => {
+        const dx = p.x - px, dy = p.y - WALL;
+        const d = Math.hypot(dx, dy);
+        if (d < p.r + 4) {
+          const nx = dx / (d || 1), ny = dy / (d || 1);
+          const overlap = (p.r + 4) - d;
+          p.x += nx * overlap;
+          p.y += ny * overlap;
+          const vn = p.vx * nx + p.vy * ny;
+          p.vx -= 2 * vn * nx;
+          p.vy -= 2 * vn * ny;
+          p.vx *= e; p.vy *= e;
+          onBounce();
+        }
+      };
+      postCollide(goalL);
+      postCollide(goalR);
+    }
+
+    // Goal check: fully past top inside goal zone
+    if (p.y + p.r < WALL && p.x > goalL + 2 && p.x < goalR - 2) {
+      scoreGoal();
+      return;
+    }
+
+    // Obstacles (circles)
+    for (const o of state.obstacles) {
+      const dx = p.x - o.x, dy = p.y - o.y;
+      const d = Math.hypot(dx, dy);
+      const minD = p.r + o.r;
+      if (d < minD && d > 0) {
+        const nx = dx / d, ny = dy / d;
+        const overlap = minD - d;
+        p.x += nx * overlap;
+        p.y += ny * overlap;
+        const vn = p.vx * nx + p.vy * ny;
+        p.vx -= 2 * vn * nx;
+        p.vy -= 2 * vn * ny;
+        p.vx *= e * 1.02; p.vy *= e * 1.02; // bumpers give a tiny boost
+        onBounce();
+      }
+    }
+
+    // Defenders (rectangles) — circle vs AABB
+    for (const d of state.defenders) {
+      const nearestX = Math.max(d.x, Math.min(p.x, d.x + d.w));
+      const nearestY = Math.max(d.y, Math.min(p.y, d.y + d.h));
+      const dx = p.x - nearestX;
+      const dy = p.y - nearestY;
+      const dist = Math.hypot(dx, dy);
+      if (dist < p.r) {
+        const heavy = p.mass >= 2.0;
+        if (heavy && Math.hypot(p.vx, p.vy) > 4) {
+          // Plow through — slow down but keep going
+          p.vx *= 0.82; p.vy *= 0.82;
+          spawnParticles(p.x, p.y, '#ff3860', 10);
+          onBounce(0.4);
+          // briefly displace defender
+          d.vx = -d.vx;
+        } else {
+          let nx, ny;
+          if (dist === 0) { nx = 0; ny = -1; }
+          else { nx = dx / dist; ny = dy / dist; }
+          const overlap = p.r - dist + 0.5;
+          p.x += nx * overlap;
+          p.y += ny * overlap;
+          const vn = p.vx * nx + p.vy * ny;
+          p.vx -= 2 * vn * nx;
+          p.vy -= 2 * vn * ny;
+          p.vx *= e; p.vy *= e;
+          state.streak = 0;
+          onBounce();
+        }
+      }
+    }
+
+    // Stop condition
+    const speed = Math.hypot(p.vx, p.vy);
+    if (speed < 0.15 && p.moving) {
+      p.vx = 0; p.vy = 0;
+      p.moving = false;
+      // Respawn to bottom after brief pause if not scored
+      state.spawnCooldown = 0.35;
+    }
+  }
+
+  function updateDefenders(dt) {
+    for (const d of state.defenders) {
+      d.x += d.vx * dt * 60;
+      if (d.x < d.originX - d.range) { d.x = d.originX - d.range; d.vx = -d.vx; }
+      if (d.x > d.originX + d.range) { d.x = d.originX + d.range; d.vx = -d.vx; }
+    }
+  }
+
+  function onBounce(intensity = 1) {
+    shake(3 * intensity, 0.18);
+    const p = state.puck;
+    spawnParticles(p.x, p.y, p.glow, 4);
+  }
+
+  function shake(mag, dur) {
+    state.shakeMag = Math.max(state.shakeMag, mag);
+    state.shakeT = Math.max(state.shakeT, dur);
+  }
+
+  function spawnParticles(x, y, color, n) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = 1 + Math.random() * 3;
+      state.particles.push({
+        x, y,
+        vx: Math.cos(a) * s,
+        vy: Math.sin(a) * s,
+        life: 0.4 + Math.random() * 0.4,
+        maxLife: 0.8,
+        color,
+        r: 1.5 + Math.random() * 2,
+      });
+    }
+  }
+
+  function updateParticles(dt) {
+    for (let i = state.particles.length - 1; i >= 0; i--) {
+      const pt = state.particles[i];
+      pt.x += pt.vx * dt * 60;
+      pt.y += pt.vy * dt * 60;
+      pt.vx *= 0.94; pt.vy *= 0.94;
+      pt.life -= dt;
+      if (pt.life <= 0) state.particles.splice(i, 1);
+    }
+  }
+
+  function scoreGoal() {
+    state.streak += 1;
+    if (state.streak > state.bestStreak) state.bestStreak = state.streak;
+    const streakBonus = Math.min(state.streak - 1, 4);
+    const points = 1 + streakBonus;
+    state.score += points;
+    state.goals += 1;
+    state.lastGoalT = performance.now() / 1000;
+
+    // Particles/shake
+    shake(8, 0.35);
+    for (let i = 0; i < 30; i++) spawnParticles(FIELD_W/2, WALL + 4, '#ffd166', 1);
+    showBurst(state.streak > 1 ? `+${points}  x${state.streak}` : `GOAL +${points}`);
+
+    state.puck.alive = false;
+    state.spawnCooldown = 0.25;
+  }
+
+  function showBurst(text) {
+    const el = document.createElement('div');
+    el.className = 'burst';
+    el.style.left = '50%';
+    el.style.top = '38%';
+    el.textContent = text;
+    document.getElementById('wrap').appendChild(el);
+    setTimeout(() => el.remove(), 850);
+  }
+
+  // --- Main loop ---
+  let lastT = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.033, (now - lastT) / 1000);
+    lastT = now;
+
+    if (state.running) {
+      state.time -= dt;
+      if (state.time <= 0) {
+        state.time = 0;
+        endGame();
+      } else {
+        updateDefenders(dt);
+        if (state.puck && state.puck.alive) stepPhysics(dt);
+
+        if (state.spawnCooldown > 0) {
+          state.spawnCooldown -= dt;
+          if (state.spawnCooldown <= 0 && state.time > 0) {
+            resetPuck();
+          }
+        }
+      }
+      updateParticles(dt);
+
+      // HUD
+      document.getElementById('hudScore').textContent = state.score;
+      document.getElementById('hudTime').textContent = state.time.toFixed(1);
+      const pct = Math.max(0, state.time / 15) * 100;
+      const fill = document.getElementById('timeFill');
+      fill.style.width = pct + '%';
+      fill.style.background = state.time < 5 ? '#ff3860' : '#ffd166';
+    }
+
+    // Shake decay
+    if (state.shakeT > 0) state.shakeT -= dt;
+    else state.shakeMag = 0;
+
+    render();
+    requestAnimationFrame(frame);
+  }
+
+  // --- Rendering ---
+  function render() {
+    // Background
+    ctx.save();
+    // Apply shake in canvas coords
+    let sx = 0, sy = 0;
+    if (state.shakeT > 0) {
+      sx = (Math.random() - 0.5) * state.shakeMag;
+      sy = (Math.random() - 0.5) * state.shakeMag;
+    }
+    ctx.translate(sx, sy);
+
+    // Ice
+    const grad = ctx.createLinearGradient(0, 0, 0, FIELD_H);
+    grad.addColorStop(0, '#1a3355');
+    grad.addColorStop(0.5, '#244871');
+    grad.addColorStop(1, '#1a3355');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, FIELD_W, FIELD_H);
+
+    // Center line
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 8]);
+    ctx.beginPath();
+    ctx.moveTo(WALL, FIELD_H / 2);
+    ctx.lineTo(FIELD_W - WALL, FIELD_H / 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Center circle
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.beginPath();
+    ctx.arc(FIELD_W / 2, FIELD_H / 2, 50, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Walls (top/bottom/sides)
+    ctx.fillStyle = '#0d1f38';
+    ctx.fillRect(0, 0, FIELD_W, WALL);
+    ctx.fillRect(0, FIELD_H - WALL, FIELD_W, WALL);
+    ctx.fillRect(0, 0, WALL, FIELD_H);
+    ctx.fillRect(FIELD_W - WALL, 0, WALL, FIELD_H);
+
+    // Goal area at top
+    const goalL = (FIELD_W - GOAL_W) / 2;
+    const goalR = (FIELD_W + GOAL_W) / 2;
+    // Clear the top wall segment where goal is
+    ctx.clearRect(goalL, 0, GOAL_W, WALL);
+    // Goal back (behind the opening)
+    ctx.fillStyle = 'rgba(255,56,96,0.18)';
+    ctx.fillRect(goalL, -GOAL_DEPTH, GOAL_W, GOAL_DEPTH + WALL);
+    // Goal net lines
+    ctx.strokeStyle = 'rgba(255,56,96,0.35)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 6; i++) {
+      const x = goalL + (GOAL_W / 6) * i;
+      ctx.beginPath();
+      ctx.moveTo(x, -GOAL_DEPTH);
+      ctx.lineTo(x, WALL);
+      ctx.stroke();
+    }
+    // Goal posts
+    ctx.fillStyle = '#ff3860';
+    ctx.beginPath();
+    ctx.arc(goalL, WALL, 4, 0, Math.PI * 2);
+    ctx.arc(goalR, WALL, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Goal line (inside)
+    ctx.strokeStyle = 'rgba(255,56,96,0.7)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(goalL, WALL);
+    ctx.lineTo(goalR, WALL);
+    ctx.stroke();
+
+    // Obstacles
+    for (const o of state.obstacles) {
+      const g = ctx.createRadialGradient(o.x - 4, o.y - 4, 2, o.x, o.y, o.r);
+      g.addColorStop(0, '#6b8bb6');
+      g.addColorStop(1, '#2c4260');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    // Defenders
+    for (const d of state.defenders) {
+      ctx.fillStyle = 'rgba(255,56,96,0.25)';
+      ctx.fillRect(d.x - 2, d.y - 2, d.w + 4, d.h + 4);
+      ctx.fillStyle = '#ff3860';
+      ctx.fillRect(d.x, d.y, d.w, d.h);
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      ctx.fillRect(d.x + 2, d.y + 2, d.w - 4, 2);
+    }
+
+    // Particles
+    for (const pt of state.particles) {
+      const a = Math.max(0, pt.life / pt.maxLife);
+      ctx.globalAlpha = a;
+      ctx.fillStyle = pt.color;
+      ctx.beginPath();
+      ctx.arc(pt.x, pt.y, pt.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Puck trail
+    const p = state.puck;
+    if (p && p.alive) {
+      for (let i = 0; i < p.trail.length; i++) {
+        const t = p.trail[i];
+        const a = (i / p.trail.length) * 0.35;
+        ctx.globalAlpha = a;
+        ctx.fillStyle = p.glow;
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, p.r * (0.4 + i / p.trail.length * 0.6), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+
+      // Puck
+      const pg = ctx.createRadialGradient(p.x - 3, p.y - 3, 1, p.x, p.y, p.r);
+      pg.addColorStop(0, '#fff');
+      pg.addColorStop(0.3, p.color);
+      pg.addColorStop(1, p.glow);
+      ctx.fillStyle = pg;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Highlight
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.beginPath();
+      ctx.arc(p.x - 4, p.y - 4, p.r * 0.35, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Aim preview (slingshot)
+      if (state.aim && !p.moving) {
+        const dx = state.aim.x0 - state.aim.x;
+        const dy = state.aim.y0 - state.aim.y;
+        const len = Math.hypot(dx, dy);
+        const clamped = Math.min(len, MAX_AIM_LEN);
+        if (len > 0) {
+          const nx = dx / len, ny = dy / len;
+          const endX = p.x + nx * clamped;
+          const endY = p.y + ny * clamped;
+          // Power dots
+          const dots = 8;
+          const power = clamped / MAX_AIM_LEN;
+          for (let i = 1; i <= dots; i++) {
+            const t = i / dots;
+            ctx.globalAlpha = 0.3 + 0.7 * t * power;
+            ctx.fillStyle = power > 0.8 ? '#ff3860' : (power > 0.5 ? '#ffd166' : '#5ce1e6');
+            ctx.beginPath();
+            ctx.arc(p.x + nx * clamped * t, p.y + ny * clamped * t, 2.5 + 2 * t, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.globalAlpha = 1;
+          // Arrowhead
+          const ah = 10;
+          const ang = Math.atan2(ny, nx);
+          ctx.fillStyle = power > 0.8 ? '#ff3860' : '#ffd166';
+          ctx.beginPath();
+          ctx.moveTo(endX, endY);
+          ctx.lineTo(endX - Math.cos(ang - 0.4) * ah, endY - Math.sin(ang - 0.4) * ah);
+          ctx.lineTo(endX - Math.cos(ang + 0.4) * ah, endY - Math.sin(ang + 0.4) * ah);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+    }
+
+    ctx.restore();
+  }
+
+  // --- Game flow ---
+  function startGame() {
+    state.running = true;
+    state.time = 15;
+    state.score = 0;
+    state.goals = 0;
+    state.streak = 0;
+    state.bestStreak = 0;
+    state.particles = [];
+    state.puckType = PUCKS.find(p => p.id === save.selectedPuck) || PUCKS[0];
+    setupLevel();
+    resetPuck();
+    document.getElementById('menuOverlay').classList.add('hidden');
+    document.getElementById('endOverlay').classList.add('hidden');
+    document.getElementById('hud').classList.remove('hidden');
+  }
+
+  function endGame() {
+    state.running = false;
+    state.puck = null;
+    save.totalGoals += state.goals;
+    if (state.score > save.best) save.best = state.score;
+    persist();
+    document.getElementById('endScore').textContent = state.score;
+    document.getElementById('endGoals').textContent = state.goals;
+    document.getElementById('endStreak').textContent = state.bestStreak;
+    document.getElementById('endBest').textContent = save.best;
+    document.getElementById('hud').classList.add('hidden');
+
+    // Check for new unlocks
+    const newlyUnlocked = PUCKS.filter(p => p.unlock > 0 && save.totalGoals >= p.unlock && save.totalGoals - state.goals < p.unlock);
+    if (newlyUnlocked.length) {
+      document.getElementById('endTitle').textContent = 'New Puck Unlocked!';
+      document.getElementById('endMsg').textContent = `"${newlyUnlocked[0].name}" is available in the puck menu.`;
+    } else if (state.score === save.best && state.score > 0) {
+      document.getElementById('endTitle').textContent = 'New Best!';
+      document.getElementById('endMsg').textContent = `Beat your record with ${state.score} points.`;
+    } else {
+      document.getElementById('endTitle').textContent = 'Time\'s Up';
+      document.getElementById('endMsg').textContent = state.goals === 0 ? 'Try aiming for bounces off the bumpers.' : 'Streak goals for bonus points.';
+    }
+    document.getElementById('endOverlay').classList.remove('hidden');
+  }
+
+  // --- Menu / puck select ---
+  function renderMenu() {
+    document.getElementById('bestScore').textContent = save.best;
+    document.getElementById('totalGoals').textContent = save.totalGoals;
+    const grid = document.getElementById('puckGrid');
+    grid.innerHTML = '';
+    for (const puck of PUCKS) {
+      const unlocked = save.totalGoals >= puck.unlock;
+      const card = document.createElement('div');
+      card.className = 'puck-card';
+      if (!unlocked) card.classList.add('locked');
+      if (save.selectedPuck === puck.id && unlocked) card.classList.add('selected');
+      card.innerHTML = `
+        <div class="puck-visual" style="background: radial-gradient(circle at 35% 35%, #fff, ${puck.color} 55%, ${puck.glow});"></div>
+        <div class="puck-name">${puck.name}</div>
+        <div class="puck-desc">${puck.desc}</div>
+        ${unlocked ? '' : `<div class="puck-req">${puck.unlock} goals to unlock (${save.totalGoals}/${puck.unlock})</div>`}
+      `;
+      if (unlocked) {
+        card.addEventListener('click', () => {
+          save.selectedPuck = puck.id;
+          persist();
+          renderMenu();
+        });
+      }
+      grid.appendChild(card);
+    }
+  }
+
+  document.getElementById('playBtn').addEventListener('click', startGame);
+  document.getElementById('playAgainBtn').addEventListener('click', startGame);
+  document.getElementById('menuBtn').addEventListener('click', () => {
+    document.getElementById('endOverlay').classList.add('hidden');
+    document.getElementById('menuOverlay').classList.remove('hidden');
+    renderMenu();
+  });
+
+  renderMenu();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
