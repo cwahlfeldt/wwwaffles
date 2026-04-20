@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Bit-Dungeon Slider</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="hud">
+      <div class="stat"><span class="label">TURN</span><span id="floor">0</span></div>
+      <div class="stat"><span class="label">HP</span><span id="hp">10</span></div>
+      <div class="stat"><span class="label">ATK</span><span id="atk">2</span></div>
+      <div class="stat"><span class="label">SCORE</span><span id="score">0</span></div>
+    </header>
+
+    <div class="next-row">
+      <span class="next-caption">NEXT</span>
+      <div id="next-sprite" class="next-sprite" aria-label="Next tile"></div>
+      <span id="next-label" class="next-name">—</span>
+    </div>
+
+    <div id="board" class="board" aria-label="Dungeon grid"></div>
+
+    <p id="log" class="log">Slide tiles. Everything moves.</p>
+
+    <div class="controls">
+      <button id="help" type="button" class="icon-btn" aria-label="How to play">?</button>
+      <button id="restart" type="button">NEW RUN</button>
+    </div>
+
+    <div id="gameover" class="overlay hidden">
+      <div class="overlay-panel">
+        <h1 id="over-title">YOU DIED</h1>
+        <p id="over-stats"></p>
+        <button id="over-restart" type="button">TRY AGAIN</button>
+      </div>
+    </div>
+
+    <div id="rules" class="overlay hidden">
+      <div class="overlay-panel rules-panel">
+        <h1>HOW TO PLAY</h1>
+        <p class="tagline">Threes! meets a tactical dungeon. Everything on the board moves together — and nothing is ever simply erased.</p>
+
+        <div class="rules-section">
+          <h2>CONTROLS</h2>
+          <ul>
+            <li><b>Swipe</b> on touch, or <b>arrow keys / WASD</b> on desktop</li>
+            <li>Every swipe slides <b>every tile</b> in that direction until blocked</li>
+            <li>A new tile spawns each turn — check the <b>NEXT</b> preview above the board</li>
+          </ul>
+        </div>
+
+        <div class="rules-section">
+          <h2>CORE PRINCIPLE: PRESSURE</h2>
+          <p class="principle">Every swipe adds a new tile. Nothing ever "clears" without intent — you have to engineer collisions to free space. Tension builds as the board fills.</p>
+        </div>
+
+        <div class="rules-section">
+          <h2>COMBAT</h2>
+          <p class="rule-note"><b>Sliding into an enemy attacks it — you do not move.</b><br>
+          If the enemy dies, its cell empties.<br>
+          If it survives and the tile <i>behind</i> it is open, it gets <b>shoved back</b>.<br>
+          If that tile is blocked (wall or another tile), the enemy <b>counter-attacks</b> — this is the only way enemies damage you.</p>
+        </div>
+
+        <div class="rules-section">
+          <h2>UNITS</h2>
+          <ul class="unit-list">
+            <li><span class="sprite-box player"></span><div><b>Hero (you)</b></div></li>
+            <li><span class="sprite-box enemy-1"></span><div><b>Rat</b> — 1 HP, 1 ATK</div></li>
+            <li><span class="sprite-box enemy-2"></span><div><b>Goblin</b> — 2 HP, 1 ATK</div></li>
+            <li><span class="sprite-box enemy-3"></span><div><b>Orc</b> — 3 HP, 2 ATK</div></li>
+            <li><span class="sprite-box enemy-4"></span><div><b>Skeleton</b> — 4 HP, 2 ATK</div></li>
+            <li><span class="sprite-box enemy-5"></span><div><b>Demon</b> — 5 HP, 3 ATK</div></li>
+          </ul>
+          <p class="rule-note">Two <b>same-tier</b> enemies sliding together <b>merge</b> into the next tier up — Threes!-style. A threat spike, but fewer pieces on the board.</p>
+        </div>
+
+        <div class="rules-section">
+          <h2>TRAPS</h2>
+          <ul class="unit-list">
+            <li><span class="sprite-box trap"></span><div><b>Spike Trap</b><br><small>Slides like everything else.</small></div></li>
+          </ul>
+          <p class="rule-note"><b>Enemy + Trap</b> → enemy takes trap damage, trap is destroyed. Chain enemies into traps to clear them cheaply.<br>
+          <b>Trap + Trap</b> → both break.<br>
+          <b>You + Trap</b> → you take damage, trap is destroyed.</p>
+        </div>
+
+        <div class="rules-section">
+          <h2>LOOT</h2>
+          <ul class="unit-list">
+            <li><span class="sprite-box loot-heart"></span><div><b>Heart</b> — restores 3 HP</div></li>
+            <li><span class="sprite-box loot-sword"></span><div><b>Sword</b> — +1 ATK permanently</div></li>
+            <li><span class="sprite-box loot-gold"></span><div><b>Gold</b> — +5 score</div></li>
+          </ul>
+          <p class="rule-note">Loot also slides. Enemies and traps will destroy it if they reach it first.</p>
+        </div>
+
+        <div class="rules-section">
+          <h2>GAME OVER</h2>
+          <ul>
+            <li>HP drops to 0, <b>or</b></li>
+            <li>the board fills and no swipe produces a collision or movement</li>
+          </ul>
+        </div>
+
+        <button id="rules-close" type="button">GOT IT</button>
+      </div>
+    </div>
+  </div>
+  <script src="sprites.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
