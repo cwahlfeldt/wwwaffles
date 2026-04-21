@@ -1,0 +1,758 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover" />
+<title>Scale-Free</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #02040a; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #dbe7ff; user-select: none; -webkit-user-select: none; touch-action: none; }
+  #game { position: fixed; inset: 0; display: block; width: 100%; height: 100%; }
+  .hud { position: fixed; left: 12px; top: 12px; display: flex; flex-direction: column; gap: 6px; pointer-events: none; font-variant-numeric: tabular-nums; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
+  .hud .row { display: flex; align-items: center; gap: 8px; font-size: 13px; opacity: .92; }
+  .pill { background: rgba(10,18,36,.55); border: 1px solid rgba(120,160,220,.25); padding: 4px 8px; border-radius: 999px; font-size: 12px; }
+  .bar { width: 200px; height: 8px; background: rgba(255,255,255,.08); border-radius: 999px; overflow: hidden; border: 1px solid rgba(255,255,255,.06); }
+  .bar > i { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, #6ef0c5, #4ea0ff); transition: width .2s ease; }
+  .bar.timer > i { background: linear-gradient(90deg, #ffd36e, #ff7a6e); }
+  #scale-indicator { position: fixed; right: 12px; top: 12px; background: rgba(10,18,36,.55); border: 1px solid rgba(120,160,220,.25); padding: 6px 10px; border-radius: 10px; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
+  #hint { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); background: rgba(10,18,36,.55); border: 1px solid rgba(120,160,220,.2); color: #cfe0ff; padding: 8px 12px; border-radius: 10px; font-size: 12px; opacity: .9; pointer-events: none; }
+  .overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at center, rgba(10,20,40,.7), rgba(0,0,0,.85)); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); z-index: 10; }
+  .overlay.hidden { display: none; }
+  .card { width: min(520px, 92vw); background: rgba(14,22,44,.9); border: 1px solid rgba(120,160,220,.25); border-radius: 16px; padding: 20px; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+  .card h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: .04em; }
+  .card h2 { margin: 0 0 10px; font-size: 14px; font-weight: 500; color: #9fb6df; }
+  .card p { margin: 8px 0 14px; font-size: 13px; line-height: 1.5; color: #c5d4ef; }
+  .traits { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+  .trait { cursor: pointer; background: rgba(20,30,56,.7); border: 1px solid rgba(120,160,220,.2); padding: 12px; border-radius: 12px; transition: transform .12s ease, border-color .12s ease, background .12s ease; }
+  .trait:hover { transform: translateY(-1px); border-color: rgba(160,200,255,.45); background: rgba(28,42,78,.85); }
+  .trait .name { font-size: 14px; font-weight: 600; color: #eaf2ff; }
+  .trait .desc { font-size: 12px; color: #a9bcde; margin-top: 4px; line-height: 1.4; }
+  .actions { display: flex; gap: 8px; margin-top: 14px; }
+  button.btn { flex: 1; cursor: pointer; font: inherit; color: #081022; background: linear-gradient(180deg, #a4e7ff, #6fb8ff); border: 0; padding: 10px 12px; border-radius: 10px; font-weight: 700; letter-spacing: .03em; }
+  button.btn.secondary { background: rgba(255,255,255,.08); color: #dbe7ff; }
+  .tree { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .tree .chip { font-size: 11px; padding: 3px 8px; border-radius: 999px; background: rgba(110,240,197,.12); color: #9ef0c7; border: 1px solid rgba(110,240,197,.3); }
+  .muted { color: #8fa2c6; font-size: 12px; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div class="hud">
+  <div class="row"><span class="pill" id="phase-pill">Phase 1</span><span class="pill" id="stage-pill">Micro</span></div>
+  <div class="row"><span style="width:64px;opacity:.8">Growth</span><div class="bar"><i id="growth-bar"></i></div></div>
+  <div class="row"><span style="width:64px;opacity:.8">Time</span><div class="bar timer"><i id="timer-bar"></i></div></div>
+</div>
+
+<div id="scale-indicator">Scale: <span id="scale-label">1.0×</span></div>
+<div id="hint">Drag to move &middot; Pinch / scroll to zoom between scales</div>
+
+<div class="overlay" id="start-overlay">
+  <div class="card">
+    <h1>Scale-Free</h1>
+    <h2>A game of scale, hunger, and evolution</h2>
+    <p>Drift as a microorganism. Absorb particles to grow. <b>Pinch out</b> (or scroll up) to zoom into the <b>Macro</b> scale, where you hunt larger creatures. Survive 60-second growth phases and choose traits to evolve.</p>
+    <div class="actions">
+      <button class="btn" id="start-btn">Begin</button>
+    </div>
+    <p class="muted" style="margin-top:12px">Tip: you can only eat things smaller than you. Red rings mean danger.</p>
+  </div>
+</div>
+
+<div class="overlay hidden" id="evolve-overlay">
+  <div class="card">
+    <h1>Evolution</h1>
+    <h2 id="evolve-sub">Phase complete — pick a trait</h2>
+    <div class="traits" id="traits"></div>
+    <div class="tree" id="tree"></div>
+    <div class="actions">
+      <button class="btn secondary" id="skip-btn">Skip</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay hidden" id="end-overlay">
+  <div class="card">
+    <h1 id="end-title">You were devoured</h1>
+    <h2 id="end-sub">Rest in the biofilm</h2>
+    <p id="end-body" class="muted"></p>
+    <div class="actions">
+      <button class="btn" id="retry-btn">Restart</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d", { alpha: false });
+  const DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+
+  const W = () => canvas.width / DPR;
+  const H = () => canvas.height / DPR;
+
+  function resize() {
+    canvas.width = Math.floor(window.innerWidth * DPR);
+    canvas.height = Math.floor(window.innerHeight * DPR);
+    canvas.style.width = window.innerWidth + "px";
+    canvas.style.height = window.innerHeight + "px";
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  // ---------- Scale model ----------
+  // We represent things in a single "world" unit. "Scale" is a continuous
+  // log zoom factor where 1 = micro, and growing s zooms out toward macro.
+  // Player radius stays constant on screen; world size is what changes.
+  const MIN_S = 0.5;   // extra-micro
+  const MAX_S = 6.0;   // macro
+  const SCALE_MICRO = 1.0;
+  const SCALE_MACRO = 4.0;
+
+  function stageName(s) {
+    if (s < 1.2) return "Micro";
+    if (s < 2.3) return "Meso";
+    if (s < 3.6) return "Macro";
+    return "Mega";
+  }
+
+  // ---------- Input ----------
+  const input = {
+    pointer: null,        // {x,y} in screen space
+    moving: false,
+    targetScale: SCALE_MICRO,
+    pinchStart: null,     // {dist, scale}
+  };
+
+  function screenToWorld(sx, sy) {
+    return { x: sx, y: sy };
+  }
+
+  canvas.addEventListener("pointerdown", (e) => {
+    canvas.setPointerCapture(e.pointerId);
+    input.pointer = { x: e.clientX, y: e.clientY, id: e.pointerId };
+    input.moving = true;
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (input.pointer && input.pointer.id === e.pointerId) {
+      input.pointer.x = e.clientX;
+      input.pointer.y = e.clientY;
+    }
+  });
+  const endPointer = (e) => {
+    if (input.pointer && input.pointer.id === e.pointerId) {
+      input.pointer = null;
+      input.moving = false;
+    }
+  };
+  canvas.addEventListener("pointerup", endPointer);
+  canvas.addEventListener("pointercancel", endPointer);
+
+  // Wheel = zoom between scales
+  canvas.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const factor = Math.exp(e.deltaY * 0.0015);
+    input.targetScale = clamp(input.targetScale * factor, MIN_S, MAX_S);
+  }, { passive: false });
+
+  // Touch pinch
+  const activeTouches = new Map();
+  canvas.addEventListener("touchstart", (e) => {
+    for (const t of e.changedTouches) activeTouches.set(t.identifier, { x: t.clientX, y: t.clientY });
+    if (activeTouches.size === 2) {
+      const [a, b] = [...activeTouches.values()];
+      input.pinchStart = { dist: Math.hypot(a.x - b.x, a.y - b.y), scale: input.targetScale };
+      input.moving = false;
+      input.pointer = null;
+    }
+  }, { passive: false });
+  canvas.addEventListener("touchmove", (e) => {
+    e.preventDefault();
+    for (const t of e.changedTouches) {
+      if (activeTouches.has(t.identifier)) activeTouches.set(t.identifier, { x: t.clientX, y: t.clientY });
+    }
+    if (activeTouches.size === 2 && input.pinchStart) {
+      const [a, b] = [...activeTouches.values()];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      const ratio = d / Math.max(1, input.pinchStart.dist);
+      // Spread fingers (d grows) -> zoom OUT toward macro (scale grows)
+      input.targetScale = clamp(input.pinchStart.scale * ratio, MIN_S, MAX_S);
+    }
+  }, { passive: false });
+  const endTouch = (e) => {
+    for (const t of e.changedTouches) activeTouches.delete(t.identifier);
+    if (activeTouches.size < 2) input.pinchStart = null;
+    if (activeTouches.size === 0) { input.moving = false; input.pointer = null; }
+  };
+  canvas.addEventListener("touchend", endTouch);
+  canvas.addEventListener("touchcancel", endTouch);
+
+  // ---------- Utilities ----------
+  function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function randi(a, b) { return Math.floor(rand(a, b)); }
+
+  function hsla(h, s, l, a) { return `hsla(${h|0}, ${s|0}%, ${l|0}%, ${a})`; }
+
+  // ---------- Blob drawing ----------
+  // Pre-bake a set of blob shapes per organism for performance.
+  function makeBlobShape(seed, lobes) {
+    const n = 24;
+    const pts = [];
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      // deterministic pseudo-noise
+      const r = 0.82
+        + 0.12 * Math.sin(a * lobes + seed * 1.3)
+        + 0.08 * Math.sin(a * (lobes + 2) + seed * 2.7)
+        + 0.05 * Math.sin(a * (lobes + 5) + seed * 4.1);
+      pts.push({ a, r });
+    }
+    return pts;
+  }
+
+  function drawBlob(ctx, x, y, radius, shape, pulse, color, glow) {
+    ctx.save();
+    ctx.translate(x, y);
+    if (glow) {
+      ctx.shadowColor = color.glow;
+      ctx.shadowBlur = Math.min(24, radius * 0.8);
+    }
+    ctx.beginPath();
+    for (let i = 0; i < shape.length; i++) {
+      const p = shape[i];
+      const rr = radius * (p.r + 0.05 * Math.sin(pulse + p.a * 3));
+      const px = Math.cos(p.a) * rr;
+      const py = Math.sin(p.a) * rr;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    const grad = ctx.createRadialGradient(-radius * 0.3, -radius * 0.3, radius * 0.1, 0, 0, radius);
+    grad.addColorStop(0, color.inner);
+    grad.addColorStop(1, color.outer);
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    // nucleus
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 0.28, 0, Math.PI * 2);
+    ctx.fillStyle = color.nucleus;
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function colorFor(hue, bright = 0) {
+    return {
+      inner: hsla(hue, 80, 70 + bright, 0.95),
+      outer: hsla(hue + 20, 70, 35 + bright * 0.5, 0.9),
+      nucleus: hsla(hue - 30, 70, 25, 0.9),
+      glow: hsla(hue, 90, 60, 0.6),
+    };
+  }
+
+  // ---------- Game state ----------
+  const state = {
+    running: false,
+    phase: 1,
+    phaseTime: 0,
+    phaseLen: 60,
+    scale: SCALE_MICRO,       // current smoothed scale
+    worldSeed: Math.random() * 1000,
+    player: null,
+    particles: [],
+    organisms: [],
+    dust: [],                 // background parallax flecks
+    lastT: 0,
+    traitsOwned: [],
+    pendingEvolve: false,
+  };
+
+  const TRAITS = [
+    { id: "cilia",      name: "Cilia",       desc: "+25% movement speed",                   apply: p => p.speedMul *= 1.25 },
+    { id: "chitin",     name: "Chitin Shell", desc: "Survive one lethal hit",               apply: p => p.shield += 1 },
+    { id: "photophore", name: "Photophore",   desc: "Glow attracts particles",              apply: p => p.attract += 120 },
+    { id: "enzymes",    name: "Enzymes",      desc: "+30% growth per meal",                 apply: p => p.growthMul *= 1.3 },
+    { id: "membrane",   name: "Thick Membrane", desc: "Eat prey up to 15% larger",          apply: p => p.eatBonus += 0.15 },
+    { id: "stealth",    name: "Transparency", desc: "Predators react 40% slower",           apply: p => p.stealth += 0.4 },
+    { id: "radula",     name: "Radula",       desc: "Contact drains nearby prey",           apply: p => p.radula = true },
+    { id: "eyespot",    name: "Eyespot",      desc: "See further at all scales",            apply: p => p.vision += 1.4 },
+  ];
+
+  function newPlayer() {
+    return {
+      x: W() / 2, y: H() / 2,
+      vx: 0, vy: 0,
+      worldR: 6,           // radius in "world" units — grows with food
+      hue: 170,
+      shape: makeBlobShape(1.2, 3),
+      shapePulse: 0,
+      speedMul: 1,
+      growthMul: 1,
+      eatBonus: 0,
+      shield: 0,
+      attract: 0,
+      stealth: 0,
+      vision: 1,
+      radula: false,
+      alive: true,
+      iFrames: 0,
+    };
+  }
+
+  // Screen radius of something in world units given the current scale.
+  // Scale s means 1 world unit = (1/s) * basePx pixels.
+  const BASE_PX_PER_UNIT = 6; // at scale=1 (micro), 1 world unit is 6 pixels-ish
+  function worldRToScreen(r) { return r * BASE_PX_PER_UNIT / state.scale; }
+
+  function spawnParticles(n) {
+    for (let i = 0; i < n; i++) {
+      state.particles.push({
+        x: rand(0, W()), y: rand(0, H()),
+        worldR: rand(0.6, 1.6),
+        hue: rand(150, 220),
+        vx: rand(-4, 4), vy: rand(-4, 4),
+        wobble: rand(0, Math.PI * 2),
+      });
+    }
+  }
+
+  function spawnOrganism(scaleBand) {
+    // scaleBand ~ size relative to player
+    const sizeMul = scaleBand;
+    const worldR = Math.max(1.5, state.player.worldR * sizeMul);
+    const hue = randi(0, 360);
+    const side = randi(0, 4);
+    let x, y;
+    const margin = 80;
+    if (side === 0) { x = -margin; y = rand(0, H()); }
+    else if (side === 1) { x = W() + margin; y = rand(0, H()); }
+    else if (side === 2) { x = rand(0, W()); y = -margin; }
+    else { x = rand(0, W()); y = H() + margin; }
+    state.organisms.push({
+      x, y, vx: 0, vy: 0,
+      worldR,
+      hue,
+      shape: makeBlobShape(rand(0, 10), randi(3, 7)),
+      shapePulse: rand(0, Math.PI * 2),
+      brain: Math.random() < 0.5 ? "wander" : "hunt",
+      aggroTimer: 0,
+      wanderDir: rand(0, Math.PI * 2),
+      wanderTimer: 0,
+    });
+  }
+
+  function spawnDust() {
+    state.dust = [];
+    for (let i = 0; i < 120; i++) {
+      state.dust.push({
+        x: rand(0, W()), y: rand(0, H()),
+        depth: rand(0.3, 1.6),
+        r: rand(0.4, 1.4),
+        hue: rand(180, 240),
+      });
+    }
+  }
+
+  function restartGame() {
+    state.running = true;
+    state.phase = 1;
+    state.phaseTime = 0;
+    state.scale = SCALE_MICRO;
+    input.targetScale = SCALE_MICRO;
+    state.player = newPlayer();
+    state.particles = [];
+    state.organisms = [];
+    state.traitsOwned = [];
+    state.pendingEvolve = false;
+    spawnParticles(160);
+    spawnDust();
+    for (let i = 0; i < 6; i++) spawnOrganism(rand(0.6, 1.6));
+    hideOverlay("start-overlay");
+    hideOverlay("evolve-overlay");
+    hideOverlay("end-overlay");
+    state.lastT = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  function endGame(title, sub, body) {
+    state.running = false;
+    document.getElementById("end-title").textContent = title;
+    document.getElementById("end-sub").textContent = sub;
+    document.getElementById("end-body").textContent = body;
+    showOverlay("end-overlay");
+  }
+
+  function startEvolve() {
+    state.running = false;
+    state.pendingEvolve = true;
+    document.getElementById("evolve-sub").textContent = `Phase ${state.phase} complete — pick a trait`;
+    const pool = TRAITS.filter(t => !state.traitsOwned.includes(t.id));
+    const opts = [];
+    while (opts.length < 2 && pool.length) {
+      const idx = randi(0, pool.length);
+      opts.push(pool.splice(idx, 1)[0]);
+    }
+    if (opts.length === 0) {
+      nextPhase();
+      return;
+    }
+    const wrap = document.getElementById("traits");
+    wrap.innerHTML = "";
+    for (const t of opts) {
+      const el = document.createElement("div");
+      el.className = "trait";
+      el.innerHTML = `<div class="name">${t.name}</div><div class="desc">${t.desc}</div>`;
+      el.addEventListener("click", () => {
+        state.traitsOwned.push(t.id);
+        t.apply(state.player);
+        nextPhase();
+      });
+      wrap.appendChild(el);
+    }
+    const tree = document.getElementById("tree");
+    tree.innerHTML = "";
+    for (const id of state.traitsOwned) {
+      const t = TRAITS.find(x => x.id === id);
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.textContent = t ? t.name : id;
+      tree.appendChild(chip);
+    }
+    showOverlay("evolve-overlay");
+  }
+
+  function nextPhase() {
+    state.phase += 1;
+    state.phaseTime = 0;
+    // Grow the world: add more prey and predators as player grows.
+    state.particles.length = 0;
+    state.organisms.length = 0;
+    spawnParticles(140 + state.phase * 20);
+    const count = 6 + state.phase;
+    for (let i = 0; i < count; i++) {
+      // Range gets wider each phase; some will be bigger than player.
+      const sb = rand(0.4, 1.4 + state.phase * 0.15);
+      spawnOrganism(sb);
+    }
+    hideOverlay("evolve-overlay");
+    state.pendingEvolve = false;
+    state.running = true;
+    state.lastT = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  function showOverlay(id) { document.getElementById(id).classList.remove("hidden"); }
+  function hideOverlay(id) { document.getElementById(id).classList.add("hidden"); }
+
+  document.getElementById("start-btn").addEventListener("click", restartGame);
+  document.getElementById("retry-btn").addEventListener("click", restartGame);
+  document.getElementById("skip-btn").addEventListener("click", nextPhase);
+
+  // ---------- Simulation ----------
+  function updatePlayer(dt) {
+    const p = state.player;
+    if (!p.alive) return;
+    p.iFrames = Math.max(0, p.iFrames - dt);
+    const sr = worldRToScreen(p.worldR);
+    // Move toward pointer
+    if (input.pointer) {
+      const dx = input.pointer.x - p.x;
+      const dy = input.pointer.y - p.y;
+      const d = Math.hypot(dx, dy);
+      const maxSpeed = 140 * p.speedMul * (1 + 0.15 * (state.scale - 1));
+      if (d > 2) {
+        const t = Math.min(1, d / 120);
+        const ax = (dx / d) * maxSpeed * t;
+        const ay = (dy / d) * maxSpeed * t;
+        p.vx = lerp(p.vx, ax, 0.18);
+        p.vy = lerp(p.vy, ay, 0.18);
+      }
+    } else {
+      p.vx *= 0.92; p.vy *= 0.92;
+    }
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.x = clamp(p.x, sr, W() - sr);
+    p.y = clamp(p.y, sr, H() - sr);
+    p.shapePulse += dt * 2.6;
+  }
+
+  function updateScale(dt) {
+    state.scale = lerp(state.scale, input.targetScale, 1 - Math.pow(0.001, dt));
+  }
+
+  function updateParticles(dt) {
+    const p = state.player;
+    const pr = worldRToScreen(p.worldR);
+    for (let i = state.particles.length - 1; i >= 0; i--) {
+      const a = state.particles[i];
+      a.wobble += dt * 2;
+      a.x += a.vx * dt + Math.sin(a.wobble) * 3 * dt;
+      a.y += a.vy * dt + Math.cos(a.wobble) * 3 * dt;
+      // Attraction from photophore
+      if (p.attract > 0) {
+        const dx = p.x - a.x, dy = p.y - a.y;
+        const d = Math.hypot(dx, dy);
+        if (d < p.attract) {
+          a.x += (dx / d) * 40 * dt;
+          a.y += (dy / d) * 40 * dt;
+        }
+      }
+      // Wrap within screen
+      if (a.x < -20) a.x = W() + 20;
+      if (a.x > W() + 20) a.x = -20;
+      if (a.y < -20) a.y = H() + 20;
+      if (a.y > H() + 20) a.y = -20;
+
+      // Eat if close & micro-ish scale OR smaller-than-player anyway
+      const ar = worldRToScreen(a.worldR);
+      const dd = Math.hypot(p.x - a.x, p.y - a.y);
+      if (dd < pr + ar * 0.8) {
+        // Eating particles is efficient at Micro, less at Macro.
+        const microEffect = clamp(2.0 - state.scale * 0.4, 0.2, 2.0);
+        p.worldR += 0.04 * p.growthMul * microEffect;
+        state.particles.splice(i, 1);
+      }
+    }
+    // Keep particle count up
+    if (state.particles.length < 120) spawnParticles(8);
+  }
+
+  function updateOrganisms(dt) {
+    const p = state.player;
+    const pr = worldRToScreen(p.worldR);
+    for (let i = state.organisms.length - 1; i >= 0; i--) {
+      const o = state.organisms[i];
+      const orS = worldRToScreen(o.worldR);
+      const dx = p.x - o.x, dy = p.y - o.y;
+      const d = Math.hypot(dx, dy) || 0.001;
+      const biggerThanPlayer = o.worldR > p.worldR * (1 + p.eatBonus);
+      const muchSmaller = o.worldR < p.worldR * 0.9;
+
+      // AI
+      const reactionScale = 1 - p.stealth;
+      let tx = 0, ty = 0;
+      if (biggerThanPlayer) {
+        // Predator: chase when in range
+        const range = 320 * reactionScale + orS * 2;
+        if (d < range) { tx = dx / d; ty = dy / d; o.aggroTimer = 1.2; }
+      } else if (muchSmaller) {
+        // Prey: flee from player
+        const range = 200 + orS * 2;
+        if (d < range) { tx = -dx / d; ty = -dy / d; }
+      }
+      if (tx === 0 && ty === 0) {
+        o.wanderTimer -= dt;
+        if (o.wanderTimer <= 0) {
+          o.wanderDir = rand(0, Math.PI * 2);
+          o.wanderTimer = rand(1.2, 3.0);
+        }
+        tx = Math.cos(o.wanderDir); ty = Math.sin(o.wanderDir);
+      }
+      const baseSpeed = 60 + (biggerThanPlayer ? 40 : 20);
+      // At macro scale, big creatures look slower — they traverse fewer pixels.
+      const speed = baseSpeed / Math.max(0.8, state.scale * 0.7);
+      o.vx = lerp(o.vx, tx * speed, 0.08);
+      o.vy = lerp(o.vy, ty * speed, 0.08);
+      o.x += o.vx * dt;
+      o.y += o.vy * dt;
+      o.shapePulse += dt * 1.8;
+
+      // Wrap softly (offscreen ones can leave and new ones spawn)
+      if (o.x < -200 || o.x > W() + 200 || o.y < -200 || o.y > H() + 200) {
+        state.organisms.splice(i, 1);
+        spawnOrganism(rand(0.5, 1.4 + state.phase * 0.12));
+        continue;
+      }
+
+      // Collision / feeding
+      if (d < pr + orS * 0.75) {
+        if (biggerThanPlayer) {
+          // Player gets eaten unless shielded / iFrames
+          if (p.iFrames > 0) continue;
+          if (p.shield > 0) {
+            p.shield -= 1;
+            p.iFrames = 1.2;
+            // knockback
+            p.vx += (p.x - o.x) / d * 600;
+            p.vy += (p.y - o.y) / d * 600;
+          } else {
+            p.alive = false;
+            endGame("You were devoured", `A ${stageName(state.scale)}-scale predator got you`,
+              `Phase ${state.phase} · Traits: ${state.traitsOwned.length} · Size: ${p.worldR.toFixed(1)}u`);
+            return;
+          }
+        } else {
+          // Eat macro organism — big boost
+          // Macro scale makes this efficient; micro scale gives less
+          const macroEffect = clamp(0.4 + state.scale * 0.35, 0.5, 2.5);
+          p.worldR += (o.worldR * 0.25) * p.growthMul * macroEffect;
+          state.organisms.splice(i, 1);
+          spawnOrganism(rand(0.5, 1.4 + state.phase * 0.12));
+        }
+      } else if (p.radula && d < pr + orS + 40 && !biggerThanPlayer) {
+        // Radula area drain
+        o.worldR = Math.max(0.4, o.worldR - dt * 0.6);
+        p.worldR += dt * 0.1 * p.growthMul;
+      }
+    }
+  }
+
+  // ---------- Render ----------
+  function render() {
+    const w = W(), h = H();
+    // Background gradient shifts with scale
+    const t = (state.scale - MIN_S) / (MAX_S - MIN_S);
+    const bgA = `hsl(${lerp(215, 250, t) | 0}, ${lerp(60, 40, t)|0}%, ${lerp(6, 10, t)|0}%)`;
+    const bgB = `hsl(${lerp(195, 280, t) | 0}, ${lerp(70, 50, t)|0}%, ${lerp(3, 6, t)|0}%)`;
+    const g = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, Math.max(w, h) * 0.7);
+    g.addColorStop(0, bgA);
+    g.addColorStop(1, bgB);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+
+    // Parallax dust — slower / smaller at macro
+    const dustAlpha = lerp(0.9, 0.25, t);
+    for (const d of state.dust) {
+      const px = d.x - state.player.vx * 0.05 * d.depth;
+      const py = d.y - state.player.vy * 0.05 * d.depth;
+      const dr = d.r / Math.max(0.7, state.scale * 0.5);
+      ctx.beginPath();
+      ctx.arc(px, py, dr, 0, Math.PI * 2);
+      ctx.fillStyle = hsla(d.hue, 70, 60, 0.15 * dustAlpha / d.depth);
+      ctx.fill();
+    }
+
+    // Particles
+    for (const a of state.particles) {
+      const r = worldRToScreen(a.worldR);
+      if (r < 0.3) continue;
+      ctx.beginPath();
+      ctx.arc(a.x, a.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = hsla(a.hue, 80, 70, 0.8);
+      ctx.fill();
+      // tiny glow
+      ctx.beginPath();
+      ctx.arc(a.x, a.y, r * 2.2, 0, Math.PI * 2);
+      ctx.fillStyle = hsla(a.hue, 80, 70, 0.06);
+      ctx.fill();
+    }
+
+    // Organisms
+    const p = state.player;
+    for (const o of state.organisms) {
+      const r = worldRToScreen(o.worldR);
+      if (r < 0.5) continue;
+      const bigger = o.worldR > p.worldR * (1 + p.eatBonus);
+      const color = colorFor(o.hue, bigger ? -8 : 4);
+      drawBlob(ctx, o.x, o.y, r, o.shape, o.shapePulse, color, r > 18);
+      if (bigger) {
+        // danger ring
+        ctx.beginPath();
+        ctx.arc(o.x, o.y, r + 4, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255,90,90,0.55)";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+    }
+
+    // Player
+    const pr = worldRToScreen(p.worldR);
+    // attraction aura
+    if (p.attract > 0) {
+      const grad = ctx.createRadialGradient(p.x, p.y, pr, p.x, p.y, p.attract);
+      grad.addColorStop(0, "rgba(120,255,220,0.10)");
+      grad.addColorStop(1, "rgba(120,255,220,0)");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.attract, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    const pColor = colorFor(p.hue, 8);
+    const pulse = p.shapePulse + (p.iFrames > 0 ? Math.sin(performance.now() / 40) : 0);
+    drawBlob(ctx, p.x, p.y, pr, p.shape, pulse, pColor, true);
+
+    if (p.shield > 0) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, pr + 6, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(180,220,255,0.6)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 6]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Scale vignette
+    if (t > 0.5) {
+      const vg = ctx.createRadialGradient(w/2, h/2, Math.min(w,h)*0.3, w/2, h/2, Math.max(w,h)*0.7);
+      vg.addColorStop(0, "rgba(0,0,0,0)");
+      vg.addColorStop(1, `rgba(0,0,0,${(t-0.5)*0.6})`);
+      ctx.fillStyle = vg;
+      ctx.fillRect(0, 0, w, h);
+    }
+  }
+
+  // ---------- HUD ----------
+  const growthBar = document.getElementById("growth-bar");
+  const timerBar = document.getElementById("timer-bar");
+  const phasePill = document.getElementById("phase-pill");
+  const stagePill = document.getElementById("stage-pill");
+  const scaleLabel = document.getElementById("scale-label");
+  const hint = document.getElementById("hint");
+  let hintTimer = 8;
+
+  function updateHud() {
+    const p = state.player;
+    // Growth target scales with phase
+    const target = 18 + state.phase * 10;
+    const pct = clamp((p.worldR - 6) / (target - 6), 0, 1);
+    growthBar.style.width = (pct * 100).toFixed(1) + "%";
+    const tpct = clamp(1 - state.phaseTime / state.phaseLen, 0, 1);
+    timerBar.style.width = (tpct * 100).toFixed(1) + "%";
+    phasePill.textContent = `Phase ${state.phase}`;
+    stagePill.textContent = stageName(state.scale);
+    scaleLabel.textContent = state.scale.toFixed(2) + "×";
+    hint.style.opacity = hintTimer > 0 ? Math.min(1, hintTimer) : 0;
+  }
+
+  // ---------- Main loop ----------
+  function loop(now) {
+    if (!state.running) return;
+    const dt = Math.min(0.05, (now - state.lastT) / 1000);
+    state.lastT = now;
+    hintTimer -= dt;
+
+    updateScale(dt);
+    updatePlayer(dt);
+    updateParticles(dt);
+    updateOrganisms(dt);
+
+    state.phaseTime += dt;
+    if (state.phaseTime >= state.phaseLen && !state.pendingEvolve && state.player.alive) {
+      startEvolve();
+      render(); updateHud();
+      return;
+    }
+
+    render();
+    updateHud();
+    requestAnimationFrame(loop);
+  }
+
+  // Draw a static frame behind the start screen
+  (function staticFrame() {
+    state.player = newPlayer();
+    spawnDust();
+    spawnParticles(80);
+    for (let i = 0; i < 6; i++) spawnOrganism(rand(0.6, 1.4));
+    render();
+  })();
+
+})();
+</script>
+</body>
+</html>

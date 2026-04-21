@@ -1,0 +1,925 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Rune-Roll</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    height: 100%;
+    background: radial-gradient(ellipse at center, #1a0b2e 0%, #0a0416 80%);
+    color: #e8d5ff;
+    font-family: 'Trebuchet MS', 'Segoe UI', system-ui, sans-serif;
+    overflow: hidden;
+    touch-action: none;
+  }
+  #app {
+    position: fixed; inset: 0;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  #hud {
+    width: 100%; max-width: 520px;
+    padding: 10px 14px;
+    display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;
+    align-items: center;
+  }
+  .stat {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(180,140,255,0.25);
+    border-radius: 10px;
+    padding: 6px 10px;
+    text-align: center;
+    box-shadow: 0 0 12px rgba(130,80,220,0.15) inset;
+  }
+  .stat .label { font-size: 10px; letter-spacing: 2px; opacity: 0.65; }
+  .stat .value { font-size: 18px; font-weight: bold; color: #fff; text-shadow: 0 0 8px #a070ff; }
+  #timer .value.low { color: #ff6a6a; text-shadow: 0 0 10px #ff3030; }
+  #boardWrap {
+    position: relative; flex: 1;
+    display: flex; align-items: center; justify-content: center;
+    width: 100%;
+  }
+  canvas {
+    background: #120824;
+    border-radius: 14px;
+    box-shadow: 0 0 40px rgba(130,80,220,0.3), 0 0 80px rgba(255,100,220,0.1);
+    touch-action: none;
+  }
+  #spellbar {
+    width: 100%; max-width: 520px;
+    padding: 10px 14px;
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;
+  }
+  .spell {
+    position: relative;
+    aspect-ratio: 1;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+    overflow: hidden;
+    transition: transform 0.1s;
+  }
+  .spell .fill {
+    position: absolute; left: 0; bottom: 0; width: 100%;
+    background: linear-gradient(180deg, var(--c1), var(--c2));
+    opacity: 0.55;
+    transition: height 0.25s ease-out;
+  }
+  .spell .icon { position: relative; z-index: 2; filter: drop-shadow(0 0 4px rgba(0,0,0,0.8)); }
+  .spell.ready { border-color: #fff; box-shadow: 0 0 18px var(--c1), 0 0 40px var(--c1); animation: pulse 0.8s ease-in-out infinite alternate; }
+  .spell.ready:active { transform: scale(0.9); }
+  @keyframes pulse { from { transform: scale(1); } to { transform: scale(1.06); } }
+  #rollBtn {
+    position: absolute;
+    bottom: 12px; right: 12px;
+    width: 70px; height: 70px;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.4);
+    background: radial-gradient(circle at 30% 30%, #ff6ec7, #8b2fde 70%);
+    color: #fff; font-size: 11px; font-weight: bold;
+    letter-spacing: 1px;
+    cursor: pointer;
+    box-shadow: 0 0 24px rgba(255,100,220,0.6), inset 0 -4px 0 rgba(0,0,0,0.3);
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column;
+    transition: transform 0.08s;
+  }
+  #rollBtn:active { transform: scale(0.93); }
+  #rollBtn .big { font-size: 26px; }
+  #rollBtn.disabled { opacity: 0.35; pointer-events: none; }
+  #overlay {
+    position: absolute; inset: 0;
+    background: rgba(8,4,20,0.88);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 10;
+    backdrop-filter: blur(4px);
+    text-align: center;
+    padding: 20px;
+  }
+  #overlay.hidden { display: none; }
+  #overlay h1 {
+    font-size: 42px;
+    background: linear-gradient(90deg, #ff6ec7, #8b2fde, #4dc9ff);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    text-shadow: 0 0 30px rgba(180,100,240,0.5);
+    letter-spacing: 3px;
+    margin-bottom: 6px;
+  }
+  #overlay .sub { font-size: 13px; opacity: 0.65; letter-spacing: 2px; margin-bottom: 22px; }
+  #overlay .score { font-size: 56px; font-weight: bold; color: #fff; text-shadow: 0 0 20px #ff6ec7; margin: 10px 0; }
+  #overlay .best { font-size: 14px; opacity: 0.75; margin-bottom: 18px; }
+  #overlay button {
+    padding: 14px 36px;
+    border-radius: 30px;
+    border: 2px solid rgba(255,255,255,0.3);
+    background: linear-gradient(135deg, #8b2fde, #ff6ec7);
+    color: #fff;
+    font-size: 16px;
+    font-weight: bold;
+    letter-spacing: 2px;
+    cursor: pointer;
+    box-shadow: 0 0 24px rgba(255,100,220,0.5);
+    margin: 6px;
+  }
+  #overlay button:active { transform: scale(0.96); }
+  #collection {
+    margin-top: 16px;
+    display: flex; gap: 6px; flex-wrap: wrap; justify-content: center;
+    max-width: 320px;
+  }
+  .rune-badge {
+    width: 36px; height: 36px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    position: relative;
+  }
+  .rune-badge.unlocked { border-color: var(--c1); box-shadow: 0 0 10px var(--c1); }
+  .rune-badge .count { position: absolute; bottom: -4px; right: -4px; font-size: 9px; background: #000; border-radius: 8px; padding: 1px 4px; }
+  #instructions {
+    font-size: 12px; opacity: 0.7; line-height: 1.6;
+    margin: 16px 0; max-width: 340px;
+  }
+  #instructions .k { color: #ff6ec7; font-weight: bold; }
+  #toast {
+    position: absolute;
+    top: 22%; left: 50%;
+    transform: translate(-50%, 0);
+    font-size: 34px; font-weight: bold;
+    color: #fff;
+    text-shadow: 0 0 20px currentColor;
+    pointer-events: none;
+    z-index: 5;
+    opacity: 0;
+    letter-spacing: 3px;
+  }
+  #toast.show { animation: toastPop 1.1s ease-out; }
+  @keyframes toastPop {
+    0% { opacity: 0; transform: translate(-50%, 20px) scale(0.6); }
+    20% { opacity: 1; transform: translate(-50%, 0) scale(1.15); }
+    70% { opacity: 1; transform: translate(-50%, -10px) scale(1); }
+    100% { opacity: 0; transform: translate(-50%, -40px) scale(0.95); }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hud">
+    <div class="stat" id="timer"><div class="label">TIME</div><div class="value">30.0</div></div>
+    <div class="stat"><div class="label">SCORE</div><div class="value" id="scoreVal">0</div></div>
+    <div class="stat"><div class="label">COMBO</div><div class="value" id="comboVal">x1</div></div>
+  </div>
+  <div id="boardWrap">
+    <canvas id="board"></canvas>
+    <button id="rollBtn"><span class="big">🎲</span><span>ROLL</span></button>
+    <div id="toast"></div>
+  </div>
+  <div id="spellbar"></div>
+</div>
+
+<div id="overlay">
+  <h1>RUNE-ROLL</h1>
+  <div class="sub">DICE · MATCH · CAST</div>
+  <div id="overlayBody">
+    <div id="instructions">
+      <div><span class="k">TAP</span> the 🎲 die to roll runes into the board.</div>
+      <div><span class="k">SWIPE</span> adjacent runes to match 3+ in a row.</div>
+      <div>Match <span class="k">3 identical</span> runes to trigger a <span class="k">MEGA-CAST</span>!</div>
+      <div>Fill spell meters, then <span class="k">TAP</span> a glowing spell to unleash it.</div>
+      <div style="margin-top:8px;opacity:0.6;">30 seconds. Go.</div>
+    </div>
+  </div>
+  <button id="startBtn">START</button>
+  <div id="collection"></div>
+</div>
+
+<script>
+(() => {
+  // ---------- Config ----------
+  const COLS = 6, ROWS = 7;
+  const SESSION_SECONDS = 30;
+
+  const RUNES = [
+    { id: 'F', name: 'Fire',    icon: '🔥', c1: '#ff6a3d', c2: '#c01a00' },
+    { id: 'W', name: 'Water',   icon: '💧', c1: '#4dc9ff', c2: '#1458a8' },
+    { id: 'E', name: 'Earth',   icon: '🌿', c1: '#6fe06a', c2: '#1f7a2a' },
+    { id: 'A', name: 'Air',     icon: '💨', c1: '#e8f0ff', c2: '#7090b8' },
+    { id: 'L', name: 'Arcane',  icon: '✨', c1: '#d86aff', c2: '#5a1a9a' },
+  ];
+  const RUNE_BY_ID = Object.fromEntries(RUNES.map(r => [r.id, r]));
+
+  // Mega-cast costs: match 3+ fills meter, filled meter = ready.
+  const METER_MAX = 6;
+
+  // ---------- State ----------
+  const canvas = document.getElementById('board');
+  const ctx = canvas.getContext('2d');
+  const toastEl = document.getElementById('toast');
+  const scoreValEl = document.getElementById('scoreVal');
+  const comboValEl = document.getElementById('comboVal');
+  const timerEl = document.getElementById('timer');
+  const rollBtn = document.getElementById('rollBtn');
+  const overlay = document.getElementById('overlay');
+  const overlayBody = document.getElementById('overlayBody');
+  const startBtn = document.getElementById('startBtn');
+  const spellbarEl = document.getElementById('spellbar');
+  const collectionEl = document.getElementById('collection');
+
+  let TILE = 56; // computed on resize
+  let OFFX = 0, OFFY = 0;
+
+  const state = {
+    grid: [],        // ROWS x COLS of {id} or null
+    falling: [],     // tiles currently animating down
+    meters: {},      // runeId -> 0..METER_MAX
+    score: 0,
+    combo: 1,
+    comboTimer: 0,
+    timeLeft: SESSION_SECONDS,
+    running: false,
+    dragging: null,  // {r,c,startX,startY}
+    swapAnim: null,
+    clearing: [],    // cells being cleared (for fx)
+    rollCooldown: 0,
+    lastTs: 0,
+    particles: [],
+    shake: 0,
+  };
+
+  const save = {
+    best: 0,
+    runeCounts: {},  // runeId -> total cleared (lifetime)
+  };
+
+  function loadSave() {
+    try {
+      const raw = localStorage.getItem('rune-roll-save');
+      if (raw) Object.assign(save, JSON.parse(raw));
+    } catch(e) {}
+    for (const r of RUNES) if (!(r.id in save.runeCounts)) save.runeCounts[r.id] = 0;
+  }
+  function writeSave() {
+    try { localStorage.setItem('rune-roll-save', JSON.stringify(save)); } catch(e) {}
+  }
+
+  // ---------- Setup ----------
+  function resize() {
+    const wrap = document.getElementById('boardWrap');
+    const maxW = Math.min(wrap.clientWidth - 20, 520);
+    const maxH = wrap.clientHeight - 20;
+    const tileW = Math.floor(maxW / COLS);
+    const tileH = Math.floor(maxH / ROWS);
+    TILE = Math.max(28, Math.min(tileW, tileH));
+    const w = TILE * COLS;
+    const h = TILE * ROWS;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    OFFX = 0; OFFY = 0;
+  }
+  window.addEventListener('resize', resize);
+
+  function initGrid() {
+    state.grid = [];
+    for (let r = 0; r < ROWS; r++) {
+      const row = [];
+      for (let c = 0; c < COLS; c++) row.push(null);
+      state.grid.push(row);
+    }
+  }
+
+  function initMeters() {
+    state.meters = {};
+    for (const r of RUNES) state.meters[r.id] = 0;
+    renderSpellbar();
+  }
+
+  function renderSpellbar() {
+    spellbarEl.innerHTML = '';
+    for (const r of RUNES) {
+      const m = state.meters[r.id] || 0;
+      const ready = m >= METER_MAX;
+      const el = document.createElement('div');
+      el.className = 'spell' + (ready ? ' ready' : '');
+      el.style.setProperty('--c1', r.c1);
+      el.style.setProperty('--c2', r.c2);
+      el.innerHTML = `<div class="fill" style="height:${Math.min(100, m / METER_MAX * 100)}%"></div><div class="icon">${r.icon}</div>`;
+      el.addEventListener('click', () => castSpell(r.id));
+      el.addEventListener('touchstart', (e) => { e.preventDefault(); castSpell(r.id); }, { passive: false });
+      spellbarEl.appendChild(el);
+    }
+  }
+
+  function renderCollection() {
+    collectionEl.innerHTML = '';
+    for (const r of RUNES) {
+      const count = save.runeCounts[r.id] || 0;
+      const unlocked = count > 0;
+      const el = document.createElement('div');
+      el.className = 'rune-badge' + (unlocked ? ' unlocked' : '');
+      el.style.setProperty('--c1', r.c1);
+      el.innerHTML = `<span style="opacity:${unlocked ? 1 : 0.25}">${r.icon}</span><span class="count">${count}</span>`;
+      collectionEl.appendChild(el);
+    }
+  }
+
+  // ---------- Game flow ----------
+  function startGame() {
+    overlay.classList.add('hidden');
+    initGrid();
+    initMeters();
+    state.score = 0;
+    state.combo = 1;
+    state.comboTimer = 0;
+    state.timeLeft = SESSION_SECONDS;
+    state.running = true;
+    state.falling = [];
+    state.clearing = [];
+    state.particles = [];
+    state.rollCooldown = 0;
+    state.shake = 0;
+    scoreValEl.textContent = '0';
+    comboValEl.textContent = 'x1';
+    updateTimer();
+    // Seed the board so player isn't staring at emptiness
+    rollIntoBoard(8, true);
+  }
+
+  function endGame() {
+    state.running = false;
+    if (state.score > save.best) save.best = state.score;
+    writeSave();
+    overlay.classList.remove('hidden');
+    overlayBody.innerHTML = `
+      <div class="sub">TIME'S UP</div>
+      <div class="score">${state.score}</div>
+      <div class="best">BEST: ${save.best}</div>
+    `;
+    startBtn.textContent = 'PLAY AGAIN';
+    renderCollection();
+  }
+
+  // ---------- Rolling ----------
+  function rollIntoBoard(count = 4, silent = false) {
+    if (!state.running && !silent) return;
+    if (state.rollCooldown > 0 && !silent) return;
+    state.rollCooldown = 0.25;
+
+    // Find the lowest empty cells column by column, add N runes from the top
+    const emptyByCol = [];
+    for (let c = 0; c < COLS; c++) {
+      const empties = [];
+      for (let r = 0; r < ROWS; r++) if (!state.grid[r][c]) empties.push(r);
+      emptyByCol.push(empties);
+    }
+    let added = 0;
+    const tries = count * 4;
+    for (let t = 0; t < tries && added < count; t++) {
+      const c = Math.floor(Math.random() * COLS);
+      const empties = emptyByCol[c];
+      if (!empties.length) continue;
+      const r = empties[empties.length - 1]; // lowest empty in this column
+      const rune = RUNES[Math.floor(Math.random() * RUNES.length)];
+      // spawn as falling tile from above the board
+      state.falling.push({
+        id: rune.id,
+        c,
+        targetR: r,
+        y: -TILE * (1 + Math.random() * 2),
+        vy: 0,
+      });
+      state.grid[r][c] = { id: rune.id, reserved: true }; // reserved = still falling
+      empties.pop();
+      added++;
+    }
+    if (!silent) flashToast('ROLL!', '#ff6ec7');
+  }
+
+  // ---------- Matching ----------
+  function findMatches() {
+    const matches = new Set();
+    // horizontal
+    for (let r = 0; r < ROWS; r++) {
+      let run = 1;
+      for (let c = 1; c <= COLS; c++) {
+        const prev = state.grid[r][c - 1];
+        const cur = c < COLS ? state.grid[r][c] : null;
+        const sameRun = cur && prev && !cur.reserved && !prev.reserved && cur.id === prev.id;
+        if (sameRun) run++;
+        else {
+          if (run >= 3) for (let k = 0; k < run; k++) matches.add(`${r},${c - 1 - k}`);
+          run = 1;
+        }
+      }
+    }
+    // vertical
+    for (let c = 0; c < COLS; c++) {
+      let run = 1;
+      for (let r = 1; r <= ROWS; r++) {
+        const prev = state.grid[r - 1][c];
+        const cur = r < ROWS ? state.grid[r][c] : null;
+        const sameRun = cur && prev && !cur.reserved && !prev.reserved && cur.id === prev.id;
+        if (sameRun) run++;
+        else {
+          if (run >= 3) for (let k = 0; k < run; k++) matches.add(`${r - 1 - k},${c}`);
+          run = 1;
+        }
+      }
+    }
+    return [...matches].map(s => { const [r, c] = s.split(',').map(Number); return { r, c }; });
+  }
+
+  function resolveMatches() {
+    const matches = findMatches();
+    if (!matches.length) {
+      if (state.comboTimer <= 0) state.combo = 1;
+      return false;
+    }
+    // group by rune id
+    const byId = {};
+    for (const m of matches) {
+      const cell = state.grid[m.r][m.c];
+      if (!cell) continue;
+      byId[cell.id] = (byId[cell.id] || 0) + 1;
+    }
+    // trigger mega-cast for any group >= 3 in a single id (which by definition all matches here are)
+    let mega = false;
+    for (const id in byId) {
+      const n = byId[id];
+      // meter gain: 1 per rune cleared, +1 bonus per beyond 3
+      state.meters[id] = Math.min(METER_MAX, (state.meters[id] || 0) + n);
+      save.runeCounts[id] = (save.runeCounts[id] || 0) + n;
+      if (n >= 3) mega = true;
+    }
+
+    // score
+    const baseGain = matches.length * 10 * state.combo;
+    state.score += baseGain;
+    flashToast(`+${baseGain}`, '#ffd84d');
+    scoreValEl.textContent = state.score;
+
+    // clear & particles
+    for (const m of matches) {
+      const cell = state.grid[m.r][m.c];
+      if (!cell) continue;
+      spawnBurst(m.c * TILE + TILE / 2, m.r * TILE + TILE / 2, RUNE_BY_ID[cell.id]);
+      state.grid[m.r][m.c] = null;
+    }
+
+    // combo / mega
+    state.combo = Math.min(8, state.combo + 1);
+    state.comboTimer = 2.2;
+    comboValEl.textContent = 'x' + state.combo;
+
+    if (mega) {
+      state.shake = Math.max(state.shake, 0.5);
+      // find the id with biggest group for the toast color
+      let bestId = null, bestN = 0;
+      for (const id in byId) if (byId[id] > bestN) { bestN = byId[id]; bestId = id; }
+      const r = RUNE_BY_ID[bestId];
+      flashToast('MEGA-CAST!', r.c1);
+      // bonus meter fill for mega
+      state.meters[bestId] = Math.min(METER_MAX, state.meters[bestId] + 2);
+    }
+    renderSpellbar();
+    applyGravity();
+    return true;
+  }
+
+  function applyGravity() {
+    for (let c = 0; c < COLS; c++) {
+      let write = ROWS - 1;
+      for (let r = ROWS - 1; r >= 0; r--) {
+        const cell = state.grid[r][c];
+        if (cell && !cell.reserved) {
+          if (write !== r) {
+            state.grid[write][c] = cell;
+            state.grid[r][c] = null;
+            // animate fall
+            state.falling.push({
+              id: cell.id,
+              c,
+              targetR: write,
+              y: r * TILE,
+              vy: 0,
+              existing: true,
+            });
+            state.grid[write][c].reserved = true;
+          }
+          write--;
+        }
+      }
+    }
+  }
+
+  // ---------- Spells ----------
+  function castSpell(id) {
+    if (!state.running) return;
+    if ((state.meters[id] || 0) < METER_MAX) return;
+    state.meters[id] = 0;
+    renderSpellbar();
+    const rune = RUNE_BY_ID[id];
+    state.shake = Math.max(state.shake, 0.7);
+    flashToast(`${rune.name.toUpperCase()} SPELL!`, rune.c1);
+
+    // Each element has a signature effect
+    const cleared = [];
+    if (id === 'F') {
+      // Fire: clear a random 3x3 area
+      const cr = 1 + Math.floor(Math.random() * (ROWS - 2));
+      const cc = 1 + Math.floor(Math.random() * (COLS - 2));
+      for (let r = cr - 1; r <= cr + 1; r++)
+        for (let c = cc - 1; c <= cc + 1; c++)
+          if (state.grid[r] && state.grid[r][c] && !state.grid[r][c].reserved) cleared.push({r,c});
+    } else if (id === 'W') {
+      // Water: clear 2 random rows
+      const rows = new Set();
+      while (rows.size < 2) rows.add(Math.floor(Math.random() * ROWS));
+      for (const r of rows)
+        for (let c = 0; c < COLS; c++)
+          if (state.grid[r][c] && !state.grid[r][c].reserved) cleared.push({r,c});
+    } else if (id === 'E') {
+      // Earth: clear all runes of one random id
+      const targetId = RUNES[Math.floor(Math.random() * RUNES.length)].id;
+      for (let r = 0; r < ROWS; r++)
+        for (let c = 0; c < COLS; c++)
+          if (state.grid[r][c] && !state.grid[r][c].reserved && state.grid[r][c].id === targetId) cleared.push({r,c});
+    } else if (id === 'A') {
+      // Air: clear 2 random columns
+      const cols = new Set();
+      while (cols.size < 2) cols.add(Math.floor(Math.random() * COLS));
+      for (const c of cols)
+        for (let r = 0; r < ROWS; r++)
+          if (state.grid[r][c] && !state.grid[r][c].reserved) cleared.push({r,c});
+    } else if (id === 'L') {
+      // Arcane: clear 8 random tiles
+      const pool = [];
+      for (let r = 0; r < ROWS; r++)
+        for (let c = 0; c < COLS; c++)
+          if (state.grid[r][c] && !state.grid[r][c].reserved) pool.push({r,c});
+      for (let i = 0; i < 8 && pool.length; i++) {
+        const idx = Math.floor(Math.random() * pool.length);
+        cleared.push(pool[idx]);
+        pool.splice(idx, 1);
+      }
+    }
+
+    let bonus = 0;
+    for (const {r, c} of cleared) {
+      const cell = state.grid[r][c];
+      if (!cell) continue;
+      spawnBurst(c * TILE + TILE / 2, r * TILE + TILE / 2, RUNE_BY_ID[cell.id]);
+      save.runeCounts[cell.id] = (save.runeCounts[cell.id] || 0) + 1;
+      state.grid[r][c] = null;
+      bonus += 15;
+    }
+    state.score += bonus;
+    scoreValEl.textContent = state.score;
+    applyGravity();
+  }
+
+  // ---------- Input ----------
+  function posToCell(x, y) {
+    const rect = canvas.getBoundingClientRect();
+    const px = x - rect.left;
+    const py = y - rect.top;
+    const c = Math.floor(px / TILE);
+    const r = Math.floor(py / TILE);
+    if (r < 0 || r >= ROWS || c < 0 || c >= COLS) return null;
+    return { r, c };
+  }
+
+  function onDown(x, y) {
+    if (!state.running) return;
+    const cell = posToCell(x, y);
+    if (!cell) return;
+    if (state.swapAnim) return;
+    const tile = state.grid[cell.r][cell.c];
+    if (!tile || tile.reserved) return;
+    state.dragging = { r: cell.r, c: cell.c, startX: x, startY: y };
+  }
+  function onMove(x, y) {
+    if (!state.dragging || state.swapAnim) return;
+    const dx = x - state.dragging.startX;
+    const dy = y - state.dragging.startY;
+    const abs = Math.max(Math.abs(dx), Math.abs(dy));
+    if (abs < TILE * 0.35) return;
+    let dr = 0, dc = 0;
+    if (Math.abs(dx) > Math.abs(dy)) dc = dx > 0 ? 1 : -1;
+    else dr = dy > 0 ? 1 : -1;
+    const { r, c } = state.dragging;
+    const nr = r + dr, nc = c + dc;
+    state.dragging = null;
+    if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS) return;
+    const a = state.grid[r][c];
+    const b = state.grid[nr][nc];
+    if (!a || !b || a.reserved || b.reserved) return;
+    // swap tentatively; if no match, swap back
+    state.grid[r][c] = b;
+    state.grid[nr][nc] = a;
+    state.swapAnim = {
+      a: { r, c, dr, dc, t: 0 },
+      b: { r: nr, c: nc, dr: -dr, dc: -dc, t: 0 },
+      duration: 0.18,
+      willRevert: false,
+      pending: true,
+    };
+    // check for match after swap
+    if (findMatches().length === 0) {
+      // revert after a short pause
+      state.swapAnim.willRevert = true;
+    }
+  }
+  function onUp() {
+    state.dragging = null;
+  }
+
+  canvas.addEventListener('mousedown', (e) => onDown(e.clientX, e.clientY));
+  canvas.addEventListener('mousemove', (e) => onMove(e.clientX, e.clientY));
+  window.addEventListener('mouseup', onUp);
+  canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const t = e.touches[0];
+    onDown(t.clientX, t.clientY);
+  }, { passive: false });
+  canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    const t = e.touches[0];
+    onMove(t.clientX, t.clientY);
+  }, { passive: false });
+  canvas.addEventListener('touchend', (e) => { e.preventDefault(); onUp(); }, { passive: false });
+
+  rollBtn.addEventListener('click', () => rollIntoBoard(4));
+  rollBtn.addEventListener('touchstart', (e) => { e.preventDefault(); rollIntoBoard(4); }, { passive: false });
+
+  startBtn.addEventListener('click', startGame);
+
+  // ---------- FX ----------
+  function spawnBurst(x, y, rune) {
+    for (let i = 0; i < 10; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 80 + Math.random() * 140;
+      state.particles.push({
+        x, y,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp,
+        life: 0.6 + Math.random() * 0.3,
+        age: 0,
+        color: rune.c1,
+        size: 3 + Math.random() * 3,
+      });
+    }
+  }
+
+  function flashToast(text, color) {
+    toastEl.textContent = text;
+    toastEl.style.color = color;
+    toastEl.classList.remove('show');
+    void toastEl.offsetWidth;
+    toastEl.classList.add('show');
+  }
+
+  // ---------- Draw ----------
+  function drawRune(x, y, size, rune, alpha = 1, scale = 1) {
+    const cx = x + size / 2, cy = y + size / 2;
+    const s = size * 0.42 * scale;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    // backing gem
+    const grad = ctx.createRadialGradient(cx, cy - s * 0.3, s * 0.2, cx, cy, s);
+    grad.addColorStop(0, rune.c1);
+    grad.addColorStop(1, rune.c2);
+    ctx.fillStyle = grad;
+    ctx.shadowColor = rune.c1;
+    ctx.shadowBlur = 12;
+    roundRect(cx - s, cy - s, s * 2, s * 2, s * 0.3);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    // highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    roundRect(cx - s * 0.75, cy - s * 0.9, s * 1.5, s * 0.35, s * 0.2);
+    ctx.fill();
+    // icon
+    ctx.font = `${Math.floor(s * 1.3)}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(rune.icon, cx, cy + 1);
+    ctx.restore();
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+  }
+
+  function draw() {
+    const w = canvas.width / (window.devicePixelRatio || 1);
+    const h = canvas.height / (window.devicePixelRatio || 1);
+    ctx.clearRect(0, 0, w, h);
+
+    // shake
+    let sx = 0, sy = 0;
+    if (state.shake > 0) {
+      sx = (Math.random() - 0.5) * state.shake * 12;
+      sy = (Math.random() - 0.5) * state.shake * 12;
+    }
+    ctx.save();
+    ctx.translate(sx, sy);
+
+    // grid background cells
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const x = c * TILE, y = r * TILE;
+        ctx.fillStyle = (r + c) % 2 ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.04)';
+        ctx.fillRect(x, y, TILE, TILE);
+        ctx.strokeStyle = 'rgba(180,140,255,0.08)';
+        ctx.strokeRect(x + 0.5, y + 0.5, TILE - 1, TILE - 1);
+      }
+    }
+
+    // tiles (non-falling, non-animating)
+    const swap = state.swapAnim;
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const cell = state.grid[r][c];
+        if (!cell || cell.reserved) continue;
+        let x = c * TILE, y = r * TILE;
+        if (swap && !swap.pending) {
+          // during revert animation, a/b are still in grid, offset drawing
+          if (r === swap.a.r && c === swap.a.c) {
+            const t = Math.min(1, swap.a.t / swap.duration);
+            x = (c - swap.a.dc * t) * TILE;
+            y = (r - swap.a.dr * t) * TILE;
+          } else if (r === swap.b.r && c === swap.b.c) {
+            const t = Math.min(1, swap.b.t / swap.duration);
+            x = (c - swap.b.dc * t) * TILE;
+            y = (r - swap.b.dr * t) * TILE;
+          }
+        } else if (swap && swap.pending) {
+          if (r === swap.a.r && c === swap.a.c) {
+            const t = Math.min(1, swap.a.t / swap.duration);
+            x = (c - swap.a.dc * (1 - t)) * TILE;
+            y = (r - swap.a.dr * (1 - t)) * TILE;
+          } else if (r === swap.b.r && c === swap.b.c) {
+            const t = Math.min(1, swap.b.t / swap.duration);
+            x = (c - swap.b.dc * (1 - t)) * TILE;
+            y = (r - swap.b.dr * (1 - t)) * TILE;
+          }
+        }
+        const rune = RUNE_BY_ID[cell.id];
+        drawRune(x, y, TILE, rune);
+      }
+    }
+
+    // falling tiles
+    for (const f of state.falling) {
+      const rune = RUNE_BY_ID[f.id];
+      drawRune(f.c * TILE, f.y, TILE, rune);
+    }
+
+    // particles
+    for (const p of state.particles) {
+      const a = 1 - p.age / p.life;
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = Math.max(0, a);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * a, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
+    ctx.restore();
+  }
+
+  // ---------- Update ----------
+  function update(dt) {
+    // timer
+    if (state.running) {
+      state.timeLeft -= dt;
+      if (state.timeLeft <= 0) {
+        state.timeLeft = 0;
+        updateTimer();
+        endGame();
+        return;
+      }
+      updateTimer();
+    }
+
+    if (state.comboTimer > 0) {
+      state.comboTimer -= dt;
+      if (state.comboTimer <= 0) {
+        state.combo = 1;
+        comboValEl.textContent = 'x1';
+      }
+    }
+
+    if (state.rollCooldown > 0) state.rollCooldown -= dt;
+    if (state.shake > 0) state.shake = Math.max(0, state.shake - dt * 2);
+
+    // falling physics
+    const remaining = [];
+    for (const f of state.falling) {
+      f.vy += 1400 * dt;
+      f.y += f.vy * dt;
+      const targetY = f.targetR * TILE;
+      if (f.y >= targetY) {
+        f.y = targetY;
+        // land
+        if (state.grid[f.targetR][f.c] && state.grid[f.targetR][f.c].id === f.id) {
+          state.grid[f.targetR][f.c].reserved = false;
+        }
+      } else {
+        remaining.push(f);
+      }
+    }
+    state.falling = remaining;
+
+    // swap animation
+    if (state.swapAnim) {
+      state.swapAnim.a.t += dt;
+      state.swapAnim.b.t += dt;
+      if (state.swapAnim.a.t >= state.swapAnim.duration) {
+        if (state.swapAnim.pending) {
+          state.swapAnim.pending = false;
+          if (state.swapAnim.willRevert) {
+            // revert: swap back in grid and play reverse anim
+            const { a, b } = state.swapAnim;
+            const tmp = state.grid[a.r][a.c];
+            state.grid[a.r][a.c] = state.grid[b.r][b.c];
+            state.grid[b.r][b.c] = tmp;
+            state.swapAnim.a.t = 0;
+            state.swapAnim.b.t = 0;
+            state.swapAnim.pending = false;
+            state.swapAnim.reverting = true;
+          } else {
+            state.swapAnim = null;
+          }
+        } else {
+          state.swapAnim = null;
+        }
+      }
+    }
+
+    // particles
+    const pr = [];
+    for (const p of state.particles) {
+      p.age += dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 300 * dt;
+      if (p.age < p.life) pr.push(p);
+    }
+    state.particles = pr;
+
+    // resolve matches when everything is settled
+    if (state.running && state.falling.length === 0 && !state.swapAnim) {
+      resolveMatches();
+    }
+  }
+
+  function updateTimer() {
+    const t = state.timeLeft;
+    const el = timerEl.querySelector('.value');
+    el.textContent = t.toFixed(1);
+    if (t < 6) el.classList.add('low'); else el.classList.remove('low');
+  }
+
+  function loop(ts) {
+    if (!state.lastTs) state.lastTs = ts;
+    const dt = Math.min(0.033, (ts - state.lastTs) / 1000);
+    state.lastTs = ts;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- Boot ----------
+  loadSave();
+  resize();
+  initGrid();
+  initMeters();
+  renderCollection();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
