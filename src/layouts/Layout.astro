@@ -1,0 +1,46 @@
+---
+import "../styles/global.css";
+
+interface Props {
+    title?: string;
+}
+
+const { title = "wwwaffles" } = Astro.props;
+const path = Astro.url.pathname;
+const isActive = (href: string) =>
+    href === "/" ? path === "/" : path === href || path.startsWith(href + "/");
+---
+
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+        <link rel="icon" href="/favicon.ico" />
+        <meta name="viewport" content="width=device-width" />
+        <meta name="generator" content={Astro.generator} />
+        <title>{title}</title>
+    </head>
+    <body
+        class="mx-auto max-w-2xl px-4 py-8 font-sans leading-relaxed text-gray-900"
+    >
+        <header class="mb-8 flex gap-4 border-b border-gray-200 pb-4">
+            <nav class="flex gap-4 justify-between w-full">
+                <a
+                    href="/"
+                    class="hover:underline aria-[current=page]:font-bold"
+                    aria-current={isActive("/") ? "page" : undefined}
+                    >wwwaffles</a
+                >
+                <a
+                    href="/blog"
+                    class="hover:underline aria-[current=page]:font-bold"
+                    aria-current={isActive("/blog") ? "page" : undefined}
+                    >Blog</a
+                >
+            </nav>
+        </header>
+        <main class="space-y-4">
+            <slot />
+        </main>
+    </body>
+</html>
