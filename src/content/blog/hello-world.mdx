@@ -4,8 +4,14 @@ description: First post on the blog.
 pubDate: 2026-04-29
 ---
 
+import Callout from '../../components/Callout.astro';
+
 Welcome to **wwwaffles**. This is a sample post written in MDX, so I can drop in components alongside markdown.
 
 ## Why MDX?
 
 Because sometimes you want a chart, a callout, or a custom widget right in the prose.
+
+<Callout type="warning">
+  This is a custom component {frontmatter.description}.
+</Callout>

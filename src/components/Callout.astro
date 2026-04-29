@@ -1,0 +1,12 @@
+---
+const { type = 'info' } = Astro.props;
+
+const styles = {
+  info: 'bg-blue-50 border-blue-200 text-blue-900',
+  warning: 'bg-yellow-50 border-yellow-200 text-yellow-900',
+};
+---
+
+<div class={`border-l-4 p-4 my-4 ${styles[type]}`}>
+  <slot />
+</div>
